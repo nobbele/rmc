@@ -282,13 +282,12 @@ fn main() {
             gl.bind_vertex_array(Some(vao));
             gl.draw_elements_instanced(
                 glow::TRIANGLES,
-                6 * 6,
+                36,
                 glow::UNSIGNED_BYTE,
                 0,
                 blocks.len() as _,
             );
 
-            // imgui.io().want_capture_mouse
             imgui_renderer
                 .render(&gl, &imgui_textures, imgui.render())
                 .unwrap();
