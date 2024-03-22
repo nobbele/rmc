@@ -1,4 +1,5 @@
 use glow::HasContext;
+use ndarray::Array3;
 use renderers::{ChunkRenderer, ScreenQuadRenderer};
 use rmc_common::{
     world::{raycast, Block},
@@ -88,26 +89,25 @@ fn main() {
             include_str!("../shaders/screen.frag"),
         );
 
-        let mut blocks = std::iter::repeat(())
-            .enumerate()
-            .map(|(idx, _)| Block {
-                position: Vec3::new(
-                    (idx % 16) as i32 - 8,
-                    (idx / (16 * 16)) as i32 - 16 + 1,
-                    ((idx % (16 * 16)) / 16) as i32 - 8,
-                ),
-                id: 1,
-            })
-            .take(16 * 16 * 16)
-            .collect::<Vec<_>>();
+        let mut blocks: Array3<Option<Block>> = Array3::default((16, 16, 16));
+        for y in 0..16 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    blocks[(x, y, z)] = Some(Block {
+                        position: Vec3::new(x as _, y as _, z as _),
+                        id: 1,
+                    });
+                }
+            }
+        }
 
         let mut render_chunk = ChunkRenderer::new(&gl);
-        render_chunk.update_blocks(&gl, &blocks);
+        render_chunk.update_blocks(&gl, blocks.view());
 
         let projection = Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.1);
 
         let mut camera = Camera {
-            position: Vec3::new(0.0, 2.0, 0.0),
+            position: Vec3::new(8.0, 18.0, 8.0),
             pitch: 0.0,
             yaw: 0.0,
         };
@@ -183,17 +183,16 @@ fn main() {
 
             camera.rotate_horizontal(mouse_movement.x);
             camera.rotate_vertical(mouse_movement.y);
-            camera.move_forward(fwd_bck as f32 * 2.0 * dt);
-            camera.move_right(rgh_lft as f32 * 2.0 * dt);
-            camera.move_up(up_down as f32 * 2.0 * dt);
+            camera.move_forward(fwd_bck as f32 * 3.0 * dt);
+            camera.move_right(rgh_lft as f32 * 3.0 * dt);
+            camera.move_up(up_down as f32 * 3.0 * dt);
 
-            let highlighted = raycast(camera.position, camera.look_at(), 3.5, &blocks);
+            let highlighted = raycast(camera.position, camera.look_at(), 3.5, blocks.view());
             if let Some(highlighted) = highlighted {
                 if !imgui.io().want_capture_mouse && mouse_state.left() && !prev_mouse_state.left()
                 {
-                    blocks.retain(|b| b.position != highlighted.position);
-
-                    render_chunk.update_blocks(&gl, &blocks);
+                    blocks[highlighted.position.map(|e| e as _).into_tuple()] = None;
+                    render_chunk.update_blocks(&gl, blocks.view());
                 }
             }
 
@@ -202,13 +201,12 @@ fn main() {
                     && mouse_state.right()
                     && !prev_mouse_state.right()
                 {
-                    let block = Block {
-                        position: highlighted.position + highlighted.face.map(|e| e as i32),
-                        id: 0,
-                    };
-                    blocks.push(block);
+                    let position = highlighted.position + highlighted.face.map(|e| e as i32);
 
-                    render_chunk.update_blocks(&gl, &blocks);
+                    if let Some(entry) = blocks.get_mut(position.map(|e| e as _).into_tuple()) {
+                        *entry = Some(Block { position, id: 0 });
+                        render_chunk.update_blocks(&gl, blocks.view());
+                    }
                 }
             }
 

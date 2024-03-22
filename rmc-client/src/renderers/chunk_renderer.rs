@@ -2,6 +2,7 @@ use std::mem;
 
 use bytemuck::offset_of;
 use glow::HasContext;
+use ndarray::ArrayView3;
 use rmc_common::world::Block;
 use vek::{Vec2, Vec3};
 
@@ -226,13 +227,14 @@ impl ChunkRenderer {
         }
     }
 
-    pub unsafe fn update_blocks(&mut self, gl: &glow::Context, blocks: &[Block]) {
+    pub unsafe fn update_blocks(&mut self, gl: &glow::Context, blocks: ArrayView3<Option<Block>>) {
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ibo));
         gl.buffer_data_u8_slice(
             glow::ARRAY_BUFFER,
             bytemuck::cast_slice::<_, u8>(
                 blocks
                     .iter()
+                    .filter_map(|b| b.as_ref())
                     .map(|block| Instance {
                         position: block.position.map(|e| e as f32),
                         texture: block.id,

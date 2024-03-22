@@ -1,3 +1,4 @@
+use ndarray::ArrayView3;
 use vek::Vec3;
 
 #[derive(Debug, Copy, Clone)]
@@ -16,32 +17,27 @@ pub fn raycast(
     pos: Vec3<f32>,
     dir: Vec3<f32>,
     radius: f32,
-    blocks: &[Block],
+    blocks: ArrayView3<Option<Block>>,
 ) -> Option<RaycastOutput> {
-    if let Some(block) = blocks
-        .iter()
-        .find(|b| b.position == pos.map(|e| e.floor() as i32))
-    {
+    if let Some(&Some(block)) = blocks.get((pos.map(|e| e.floor() as _)).into_tuple()) {
         return Some(RaycastOutput {
             position: block.position,
             face: Vec3::zero(),
         });
     }
 
+    const PRECISION: f32 = 0.01;
+
     let ndir = dir.normalized();
     for t in 0.. {
-        let offset = Vec3::broadcast(t as f32 / 10.) * ndir;
+        let offset = Vec3::broadcast(t as f32 * PRECISION) * ndir;
         if offset.magnitude() > radius {
             break;
         }
         let target = pos + offset;
-        if let Some(block) = blocks
-            .iter()
-            .find(|b| b.position == target.map(|e| e.floor() as i32))
-        {
-            let point_before_inside = pos + Vec3::broadcast((t - 1) as f32 / 10.) * ndir;
-            let block_position_before = point_before_inside.map(|e| e.floor() as i32);
-            let diff = block_position_before - block.position;
+        if let Some(&Some(block)) = blocks.get((target.map(|e| e.floor() as _)).into_tuple()) {
+            let point_before_inside = pos + Vec3::broadcast((t - 1) as f32 * PRECISION) * ndir;
+            let diff = point_before_inside.map(|e| e.floor() as i32) - block.position;
             if diff.sum() <= 1 {
                 return Some(RaycastOutput {
                     position: block.position,
@@ -49,10 +45,10 @@ pub fn raycast(
                 });
             }
 
-            let new_diff = if diff.z == 1 {
-                Vec3::new(diff.x, diff.y, 0)
-            } else if diff.y == 1 {
-                Vec3::new(diff.x, 0, diff.z)
+            let new_diff = if diff.z > 0 {
+                Vec3::new(diff.x.max(1), diff.y.max(1), 0)
+            } else if diff.y > 0 {
+                Vec3::new(diff.x.max(1), 0, diff.z.max(1))
             } else {
                 unreachable!()
             };
