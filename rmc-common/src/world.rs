@@ -3,6 +3,7 @@ use vek::Vec3;
 #[derive(Debug, Copy, Clone)]
 pub struct Block {
     pub position: Vec3<i32>,
+    pub id: u8,
 }
 
 #[derive(Debug, Copy, Clone)]

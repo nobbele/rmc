@@ -1,38 +1,18 @@
-use bytemuck::offset_of;
 use glow::HasContext;
+use renderers::{ChunkRenderer, ScreenQuadRenderer};
 use rmc_common::{
     world::{raycast, Block},
     Camera,
 };
 use sdl2::{event::Event, keyboard::Keycode};
 use shader::create_shader;
-use std::{collections::HashSet, mem};
-use vek::{Mat4, Vec2, Vec3};
+use std::collections::HashSet;
+use texture::{load_array_texture, load_texture, DataSource};
+use vek::{Mat3, Mat4, Vec2, Vec3};
 
-mod shader;
-
-#[derive(Debug, Default, Copy, Clone)]
-#[repr(C)]
-struct Vertex {
-    position: Vec3<f32>,
-    uv: Vec2<f32>,
-}
-
-unsafe impl bytemuck::Pod for Vertex {}
-unsafe impl bytemuck::Zeroable for Vertex {}
-
-#[derive(Debug, Copy, Clone)]
-#[repr(C)]
-struct Instance {
-    position: Vec3<f32>,
-}
-
-unsafe impl bytemuck::Pod for Instance {}
-unsafe impl bytemuck::Zeroable for Instance {}
-
-fn face_to_tri(v: &[u8; 4]) -> [u8; 6] {
-    [v[0], v[1], v[3], v[3], v[2], v[0]]
-}
+pub mod renderers;
+pub mod shader;
+pub mod texture;
 
 fn main() {
     unsafe {
@@ -79,31 +59,34 @@ fn main() {
                 .unwrap();
 
         gl.enable(glow::DEPTH_TEST);
+        gl.enable(glow::CULL_FACE);
         gl.clear_color(0.1, 0.2, 0.3, 1.0);
 
-        let test_block_texture = {
-            let test_block_image =
-                image::load_from_memory(include_bytes!("../textures/test-block.png"))
-                    .unwrap()
-                    .to_rgb8();
-            let test_block_texture = gl.create_texture().unwrap();
-            gl.bind_texture(glow::TEXTURE_2D, Some(test_block_texture));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGB as _,
-                test_block_image.width() as _,
-                test_block_image.height() as _,
-                0,
-                glow::RGB as _,
-                glow::UNSIGNED_BYTE,
-                Some(test_block_image.into_iter().as_slice()),
-            );
-            gl.generate_mipmap(glow::TEXTURE_2D);
-            test_block_texture
-        };
+        let crosshair_texture = load_texture(
+            &gl,
+            DataSource::Inline(include_bytes!("../textures/crosshair.png")),
+        );
+        let render_crosshair = ScreenQuadRenderer::new(&gl);
 
-        let program = create_shader(&gl);
+        let block_array_texture = load_array_texture(
+            &gl,
+            &[
+                DataSource::Inline(include_bytes!("../textures/test.png")),
+                DataSource::Inline(include_bytes!("../textures/grass.png")),
+            ],
+        );
+
+        let program = create_shader(
+            &gl,
+            include_str!("../shaders/cube.vert"),
+            include_str!("../shaders/cube.frag"),
+        );
+
+        let screen_program = create_shader(
+            &gl,
+            include_str!("../shaders/screen.vert"),
+            include_str!("../shaders/screen.frag"),
+        );
 
         let mut blocks = std::iter::repeat(())
             .enumerate()
@@ -113,11 +96,13 @@ fn main() {
                     (idx / (16 * 16)) as i32 - 16 + 1,
                     ((idx % (16 * 16)) / 16) as i32 - 8,
                 ),
+                id: 1,
             })
             .take(16 * 16 * 16)
             .collect::<Vec<_>>();
 
-        let (instance_buffer, vao) = create_cube(&gl, &blocks);
+        let mut render_chunk = ChunkRenderer::new(&gl);
+        render_chunk.update_blocks(&gl, &blocks);
 
         let projection = Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.1);
 
@@ -208,20 +193,7 @@ fn main() {
                 {
                     blocks.retain(|b| b.position != highlighted.position);
 
-                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer));
-                    gl.buffer_data_u8_slice(
-                        glow::ARRAY_BUFFER,
-                        bytemuck::cast_slice::<_, u8>(
-                            blocks
-                                .iter()
-                                .map(|block| Instance {
-                                    position: block.position.map(|e| e as f32),
-                                })
-                                .collect::<Vec<_>>()
-                                .as_slice(),
-                        ),
-                        glow::STATIC_DRAW,
-                    );
+                    render_chunk.update_blocks(&gl, &blocks);
                 }
             }
 
@@ -232,23 +204,11 @@ fn main() {
                 {
                     let block = Block {
                         position: highlighted.position + highlighted.face.map(|e| e as i32),
+                        id: 0,
                     };
                     blocks.push(block);
 
-                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer));
-                    gl.buffer_data_u8_slice(
-                        glow::ARRAY_BUFFER,
-                        bytemuck::cast_slice::<_, u8>(
-                            blocks
-                                .iter()
-                                .map(|block| Instance {
-                                    position: block.position.map(|e| e as f32),
-                                })
-                                .collect::<Vec<_>>()
-                                .as_slice(),
-                        ),
-                        glow::STATIC_DRAW,
-                    );
+                    render_chunk.update_blocks(&gl, &blocks);
                 }
             }
 
@@ -278,15 +238,26 @@ fn main() {
                 uniform_highlighted.z,
             );
 
-            gl.bind_texture(glow::TEXTURE_2D, Some(test_block_texture));
-            gl.bind_vertex_array(Some(vao));
-            gl.draw_elements_instanced(
-                glow::TRIANGLES,
-                36,
-                glow::UNSIGNED_BYTE,
-                0,
-                blocks.len() as _,
+            gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(block_array_texture));
+            render_chunk.draw(&gl);
+
+            let size = Vec2::new(48.0, 48.0);
+            let screen_mat = Mat3::<f32>::scaling_3d((size / Vec2::new(1024.0, 768.0)).with_z(1.0))
+                * Mat3::<f32>::translation_2d(Vec2::new(-1.0, -1.0))
+                * Mat3::<f32>::scaling_3d(Vec2::broadcast(2.0).with_z(1.0));
+
+            gl.use_program(Some(screen_program));
+            gl.uniform_matrix_3_f32_slice(
+                Some(
+                    &gl.get_uniform_location(screen_program, "uniform_Mat")
+                        .unwrap(),
+                ),
+                false,
+                screen_mat.as_col_slice(),
             );
+
+            gl.bind_texture(glow::TEXTURE_2D, Some(crosshair_texture));
+            render_crosshair.draw(&gl);
 
             imgui_renderer
                 .render(&gl, &imgui_textures, imgui.render())
@@ -299,182 +270,4 @@ fn main() {
             }
         }
     }
-}
-
-unsafe fn create_cube(gl: &glow::Context, blocks: &[Block]) -> (glow::Buffer, glow::VertexArray) {
-    let vao = gl.create_vertex_array().unwrap();
-    gl.bind_vertex_array(Some(vao));
-
-    let vbo = gl.create_buffer().unwrap();
-    gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-    gl.buffer_data_u8_slice(
-        glow::ARRAY_BUFFER,
-        bytemuck::cast_slice(&[
-            // Back vertices
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 0.0),
-                uv: Vec2::new(1.0 / 3.0, 2.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 0.0, 0.0),
-                uv: Vec2::new(0.0 / 3.0, 2.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 1.0, 0.0),
-                uv: Vec2::new(1.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 1.0, 0.0),
-                uv: Vec2::new(0.0 / 3.0, 1.0 / 2.0),
-            },
-            // Front vertices
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 1.0),
-                uv: Vec2::new(0.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 0.0, 1.0),
-                uv: Vec2::new(1.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 1.0, 1.0),
-                uv: Vec2::new(0.0, 0.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 1.0, 1.0),
-                uv: Vec2::new(1.0 / 3.0, 0.0 / 2.0),
-            },
-            // Right vertices
-            Vertex {
-                position: Vec3::new(1.0, 0.0, 0.0),
-                uv: Vec2::new(3.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 0.0, 1.0),
-                uv: Vec2::new(2.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 1.0, 0.0),
-                uv: Vec2::new(3.0 / 3.0, 0.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 1.0, 1.0),
-                uv: Vec2::new(2.0 / 3.0, 0.0 / 2.0),
-            },
-            // Left vertices
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 0.0),
-                uv: Vec2::new(2.0 / 3.0, 2.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 1.0),
-                uv: Vec2::new(3.0 / 3.0, 2.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 1.0, 0.0),
-                uv: Vec2::new(2.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 1.0, 1.0),
-                uv: Vec2::new(3.0 / 3.0, 1.0 / 2.0),
-            },
-            // Top vertices
-            Vertex {
-                position: Vec3::new(0.0, 1.0, 1.0),
-                uv: Vec2::new(1.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 1.0, 1.0),
-                uv: Vec2::new(2.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 1.0, 0.0),
-                uv: Vec2::new(1.0 / 3.0, 0.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 1.0, 0.0),
-                uv: Vec2::new(2.0 / 3.0, 0.0 / 2.0),
-            },
-            // Bottom vertices
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 0.0),
-                uv: Vec2::new(2.0 / 3.0, 2.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 0.0, 0.0),
-                uv: Vec2::new(1.0 / 3.0, 2.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 1.0),
-                uv: Vec2::new(2.0 / 3.0, 1.0 / 2.0),
-            },
-            Vertex {
-                position: Vec3::new(1.0, 0.0, 1.0),
-                uv: Vec2::new(1.0 / 3.0, 1.0 / 2.0),
-            },
-        ]),
-        glow::STATIC_DRAW,
-    );
-
-    gl.enable_vertex_attrib_array(0);
-    gl.vertex_attrib_pointer_f32(
-        0,
-        3,
-        glow::FLOAT,
-        false,
-        mem::size_of::<Vertex>() as _,
-        offset_of!(Vertex, position) as _,
-    );
-    gl.enable_vertex_attrib_array(1);
-    gl.vertex_attrib_pointer_f32(
-        1,
-        2,
-        glow::FLOAT,
-        false,
-        mem::size_of::<Vertex>() as _,
-        offset_of!(Vertex, uv) as _,
-    );
-
-    let ebo = gl.create_buffer().unwrap();
-    gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
-    gl.buffer_data_u8_slice(
-        glow::ELEMENT_ARRAY_BUFFER,
-        bytemuck::cast_slice::<[u8; 6], u8>(&[
-            // Back face
-            face_to_tri(&[0, 1, 2, 3]),
-            // Front face
-            face_to_tri(&[4, 5, 6, 7]),
-            // Right face
-            face_to_tri(&[8, 9, 10, 11]),
-            // Left face
-            face_to_tri(&[12, 13, 14, 15]),
-            // Top face
-            face_to_tri(&[16, 17, 18, 19]),
-            // Bottom face
-            face_to_tri(&[20, 21, 22, 23]),
-        ]),
-        glow::STATIC_DRAW,
-    );
-
-    let instance_buffer = gl.create_buffer().unwrap();
-    gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_buffer));
-    gl.buffer_data_u8_slice(
-        glow::ARRAY_BUFFER,
-        bytemuck::cast_slice::<_, u8>(
-            blocks
-                .iter()
-                .map(|block| Instance {
-                    position: block.position.map(|e| e as f32),
-                })
-                .collect::<Vec<_>>()
-                .as_slice(),
-        ),
-        glow::STATIC_DRAW,
-    );
-
-    gl.enable_vertex_attrib_array(2);
-    gl.vertex_attrib_pointer_f32(2, 3, glow::FLOAT, false, 0, 0);
-    gl.vertex_attrib_divisor(2, 1);
-
-    (instance_buffer, vao)
 }

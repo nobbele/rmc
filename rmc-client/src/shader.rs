@@ -10,20 +10,12 @@ unsafe fn compile_shader(gl: &glow::Context, shader_type: u32, source: &str) -> 
     shader
 }
 
-pub unsafe fn create_shader(gl: &glow::Context) -> glow::Program {
+pub unsafe fn create_shader(gl: &glow::Context, vertex: &str, fragment: &str) -> glow::Program {
     let program = gl.create_program().expect("Cannot create program");
 
-    let vertex = compile_shader(
-        gl,
-        glow::VERTEX_SHADER,
-        include_str!("../shaders/cube.vertex.glsl"),
-    );
+    let vertex = compile_shader(gl, glow::VERTEX_SHADER, vertex);
+    let fragment = compile_shader(gl, glow::FRAGMENT_SHADER, fragment);
     gl.attach_shader(program, vertex);
-    let fragment = compile_shader(
-        gl,
-        glow::FRAGMENT_SHADER,
-        include_str!("../shaders/cube.fragment.glsl"),
-    );
     gl.attach_shader(program, fragment);
 
     gl.link_program(program);

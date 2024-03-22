@@ -1,0 +1,6 @@
+{
+    "glsllint.additionalStageAssociations": {
+        ".vertex.glsl": "vert",
+        ".fragment.glsl": "frag"
+      }
+}
