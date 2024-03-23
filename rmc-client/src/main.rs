@@ -131,6 +131,12 @@ fn main() {
                 .build(|| {
                     ui.text(format!("FPS: {:.0}", fps));
                     ui.text(format!("Position: {:.2}", camera.position));
+                    ui.text(format!(
+                        "Orientation: {:.2} {:.2} ({:.2})",
+                        camera.yaw,
+                        camera.pitch,
+                        camera.look_at()
+                    ));
                 });
 
             for event in event_pump.poll_iter() {
@@ -187,7 +193,7 @@ fn main() {
             camera.move_right(rgh_lft as f32 * 3.0 * dt);
             camera.move_up(up_down as f32 * 3.0 * dt);
 
-            let highlighted = raycast(camera.position, camera.look_at(), 3.5, blocks.view());
+            let highlighted = raycast(camera.position, camera.look_at(), 7.5, blocks.view());
             if let Some(highlighted) = highlighted {
                 if !imgui.io().want_capture_mouse && mouse_state.left() && !prev_mouse_state.left()
                 {
@@ -201,7 +207,7 @@ fn main() {
                     && mouse_state.right()
                     && !prev_mouse_state.right()
                 {
-                    let position = highlighted.position + highlighted.face.map(|e| e as i32);
+                    let position = highlighted.position + highlighted.normal.map(|e| e as i32);
 
                     if let Some(entry) = blocks.get_mut(position.map(|e| e as _).into_tuple()) {
                         *entry = Some(Block { position, id: 0 });
