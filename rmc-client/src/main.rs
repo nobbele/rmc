@@ -104,7 +104,8 @@ fn main() {
         let mut render_chunk = ChunkRenderer::new(&gl);
         render_chunk.update_blocks(&gl, blocks.view());
 
-        let projection = Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.1);
+        let projection =
+            Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.0001);
 
         let mut camera = Camera {
             position: Vec3::new(8.0, 18.0, 8.0),
@@ -189,9 +190,25 @@ fn main() {
 
             camera.rotate_horizontal(mouse_movement.x);
             camera.rotate_vertical(mouse_movement.y);
+
+            let position_before = camera.position;
             camera.move_forward(fwd_bck as f32 * 3.0 * dt);
             camera.move_right(rgh_lft as f32 * 3.0 * dt);
             camera.move_up(up_down as f32 * 3.0 * dt);
+            if camera.position.floor().map(|e| e as i32)
+                != position_before.floor().map(|e| e as i32)
+            {
+                let position_below = (camera.position - Vec3::new(0.0, 1.0, 0.0)).floor();
+
+                if let (Some(Some(Some(_))), _) | (_, Some(Some(Some(_)))) = (
+                    (camera.position.map(|e| e.signum()).are_all_positive())
+                        .then(|| blocks.get(camera.position.floor().map(|e| e as _).into_tuple())),
+                    (position_below.map(|e| e.signum()).are_all_positive())
+                        .then(|| blocks.get(position_below.map(|e| e as usize).into_tuple())),
+                ) {
+                    camera.position = position_before;
+                }
+            }
 
             let highlighted = raycast(camera.position, camera.look_at(), 7.5, blocks.view());
             if let Some(highlighted) = highlighted {

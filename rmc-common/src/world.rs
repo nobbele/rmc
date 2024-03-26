@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use ndarray::ArrayView3;
 use vek::Vec3;
 
@@ -20,10 +22,21 @@ pub fn raycast_generalized<F: Fn(Vec3<i32>) -> bool>(
     voxel_size: f32,
     has_voxel: F,
 ) -> Option<RaycastOutput> {
+    if dir.normalized().magnitude() == 0.0 {
+        return None;
+    }
+
     let step = dir.map(|e| e.signum() as i32);
     let t_delta = (Vec3::broadcast(voxel_size) / dir).map(|e| e.abs());
 
-    let ipos = pos.map(|e| e.floor() as i32);
+    let ipos = pos.floor().map(|e| e as i32);
+    if has_voxel(ipos) {
+        return Some(RaycastOutput {
+            position: ipos,
+            normal: Vec3::zero(),
+        });
+    }
+
     let dist = step.zip(ipos).zip(pos).map(|((e_step, e_ipos), e_pos)| {
         if e_step > 0 {
             e_ipos as f32 + voxel_size - e_pos
@@ -40,11 +53,12 @@ pub fn raycast_generalized<F: Fn(Vec3<i32>) -> bool>(
             f32::INFINITY
         }
     });
+
     while pos.distance(grid_pos.map(|e| e as f32)) <= radius {
         let min_axis = t_max
             .into_iter()
             .enumerate()
-            .min_by(|&a, &b| a.1.partial_cmp(&b.1).unwrap())
+            .min_by(|&a, &b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal))
             .unwrap()
             .0;
 

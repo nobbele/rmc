@@ -1,6 +1,7 @@
 {
-    "glsllint.additionalStageAssociations": {
-        ".vertex.glsl": "vert",
-        ".fragment.glsl": "frag"
-      }
+  "glsllint.additionalStageAssociations": {
+    ".vertex.glsl": "vert",
+    ".fragment.glsl": "frag"
+  },
+  "cmake.configureOnOpen": false
 }
