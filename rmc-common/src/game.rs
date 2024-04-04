@@ -55,7 +55,9 @@ impl Game {
         }
     }
 
-    pub fn update(&mut self, prev: &Game, prev_input: &InputState, input: &InputState) {
+    pub fn update(&mut self, prev_input: &InputState, input: &InputState) {
+        let initial = self.clone();
+
         self.handle_camera_movement(input);
         self.handle_movement(input);
 
@@ -63,7 +65,7 @@ impl Game {
 
         self.camera.position += self.velocity;
 
-        self.handle_collision(prev);
+        self.handle_collision(&initial);
 
         self.look_at_raycast = raycast(
             self.camera.position,
@@ -92,9 +94,9 @@ impl Game {
         self.camera.move_up(up_down as f32 * SPEED);
     }
 
-    fn handle_collision(&mut self, prev: &Game) {
+    fn handle_collision(&mut self, initial: &Game) {
         if self.camera.position.floor().map(|e| e as i32)
-            != prev.camera.position.floor().map(|e| e as i32)
+            != initial.camera.position.floor().map(|e| e as i32)
         {
             let position_below = (self.camera.position - Vec3::new(0.0, 1.0, 0.0)).floor();
 
@@ -108,7 +110,7 @@ impl Game {
                         .get(position_below.map(|e| e as usize).into_tuple())
                 }),
             ) {
-                self.camera.position = prev.camera.position;
+                self.camera.position = initial.camera.position;
                 self.velocity = Vec3::zero();
             }
         }

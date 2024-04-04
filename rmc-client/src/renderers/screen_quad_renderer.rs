@@ -83,7 +83,8 @@ impl ScreenQuadRenderer {
         ScreenQuadRenderer { vao, vbo, ebo }
     }
 
-    pub unsafe fn draw(&self, gl: &glow::Context) {
+    pub unsafe fn draw(&self, gl: &glow::Context, texture: glow::Texture) {
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         gl.bind_vertex_array(Some(self.vao));
         gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_BYTE, 0);
     }

@@ -1,7 +1,10 @@
 pub mod world;
 
 mod camera;
-use std::rc::Rc;
+use std::{
+    ops::{Add, Mul, Sub},
+    rc::Rc,
+};
 
 pub use camera::Camera;
 
@@ -94,3 +97,62 @@ pub trait Apply: Sized {
 }
 
 impl<T> Apply for T {}
+
+pub struct LookBack<T> {
+    pub prev: T,
+    pub curr: T,
+}
+
+impl<T> LookBack<T> {
+    pub fn new(prev: T, curr: T) -> Self {
+        LookBack { prev, curr }
+    }
+
+    pub fn push(&mut self, new: T) {
+        self.prev = std::mem::replace(&mut self.curr, new);
+    }
+}
+
+impl<T: Clone> LookBack<T> {
+    pub fn new_identical(curr: T) -> Self {
+        Self::new(curr.clone(), curr)
+    }
+
+    pub fn push_from(&mut self, f: impl FnOnce(&T, &mut T)) {
+        let mut new = self.curr.clone();
+        f(&self.prev, &mut new);
+        self.push(new);
+    }
+}
+
+pub fn lerp<T, U: Copy>(a: T, b: T, alpha: U) -> T
+where
+    T: Mul<U, Output = T> + Add<T, Output = T>,
+    f32: Sub<U, Output = U>,
+{
+    a * (1.0 - alpha) + b * alpha
+}
+
+#[test]
+fn test_look_back() {
+    let mut a = LookBack::new_identical(0.0);
+    a.push(1.0);
+
+    assert_eq!(a.prev, 0.0);
+    assert_eq!(a.curr, 1.0);
+
+    a.push(2.0);
+
+    assert_eq!(a.prev, 1.0);
+    assert_eq!(a.curr, 2.0);
+
+    a.push_from(|&prev, val| {
+        assert_eq!(prev, 1.0);
+        assert_eq!(*val, 2.0);
+
+        *val = 3.0;
+    });
+
+    assert_eq!(a.prev, 2.0);
+    assert_eq!(a.curr, 3.0);
+}
