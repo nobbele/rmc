@@ -3,17 +3,22 @@ use std::cmp::Ordering;
 use ndarray::ArrayView3;
 use vek::Vec3;
 
+use crate::DiscreteBlend;
+
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct Block {
-    pub position: Vec3<i32>,
     pub id: u8,
 }
+
+impl DiscreteBlend for Block {}
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct RaycastOutput {
     pub position: Vec3<i32>,
     pub normal: Vec3<i8>,
 }
+
+impl DiscreteBlend for RaycastOutput {}
 
 pub fn raycast_generalized<F: Fn(Vec3<i32>) -> bool>(
     pos: Vec3<f32>,
@@ -102,18 +107,9 @@ mod tests {
     #[test]
     fn test_raycast2() {
         let mut blocks: ndarray::Array3<Option<Block>> = ndarray::Array3::default((16, 16, 16));
-        blocks[(9, 8, 0)] = Some(Block {
-            position: Vec3::new(9, 8, 0),
-            id: 0,
-        });
-        blocks[(9, 9, 0)] = Some(Block {
-            position: Vec3::new(9, 9, 0),
-            id: 0,
-        });
-        blocks[(9, 10, 0)] = Some(Block {
-            position: Vec3::new(9, 10, 0),
-            id: 0,
-        });
+        blocks[(9, 8, 0)] = Some(Block { id: 0 });
+        blocks[(9, 9, 0)] = Some(Block { id: 0 });
+        blocks[(9, 10, 0)] = Some(Block { id: 0 });
 
         assert_eq!(
             raycast(
@@ -184,10 +180,7 @@ mod tests {
         for y in 0..16 {
             for z in 0..16 {
                 for x in 0..16 {
-                    blocks[(x, y, z)] = Some(Block {
-                        position: Vec3::new(x as _, y as _, z as _),
-                        id: 1,
-                    });
+                    blocks[(x, y, z)] = Some(Block { id: 1 });
                 }
             }
         }

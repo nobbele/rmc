@@ -7,12 +7,12 @@ edition = "2021"
 
 [dependencies]
 rmc-common = { path = "../rmc-common" }
-bytemuck = { version = "1.15.0", features = ["derive"] }
-glow = "0.12.0"
-sdl2 = "0.34.5"
-vek = "0.16.1"
-imgui-glow-renderer = "0.11.0"
-imgui-sdl2-support = "0.11.0"
-imgui = "0.11.0"
-image = "0.25.0"
-ndarray = "0.15.6"
+bytemuck = { version = "1.15", features = ["derive"] }
+glow = "0.13"
+sdl2 = "0.36"
+vek = "0.16"
+imgui-glow-renderer = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
+imgui-sdl2-support = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
+imgui = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
+image = "0.25"
+ndarray = "0.15"

@@ -1,11 +1,7 @@
 use glow::HasContext;
-use ndarray::Array3;
 use renderers::{ChunkRenderer, ScreenQuadRenderer};
-use rmc_common::{
-    world::{raycast, Block},
-    Camera,
-};
-use sdl2::{event::Event, keyboard::Keycode};
+use rmc_common::{game::InputState, Apply, Blend, Game};
+use sdl2::{event::Event, keyboard::Keycode, mouse::MouseState};
 use shader::create_shader;
 use std::collections::HashSet;
 use texture::{load_array_texture, load_texture, DataSource};
@@ -32,7 +28,8 @@ fn main() {
         window.gl_make_current(&window_gl_context).unwrap();
         window.subsystem().gl_set_swap_interval(1).unwrap();
 
-        let gl = glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _);
+        let mut gl =
+            glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _);
         let mut event_pump = sdl.event_pump().unwrap();
 
         gl.enable(glow::DEBUG_OUTPUT);
@@ -89,56 +86,37 @@ fn main() {
             include_str!("../shaders/screen.frag"),
         );
 
-        let mut blocks: Array3<Option<Block>> = Array3::default((16, 16, 16));
-        for y in 0..16 {
-            for z in 0..16 {
-                for x in 0..16 {
-                    blocks[(x, y, z)] = Some(Block {
-                        position: Vec3::new(x as _, y as _, z as _),
-                        id: 1,
-                    });
-                }
-            }
-        }
+        let mut game = Game::new();
+        let mut prev_game = game.clone();
 
-        let mut render_chunk = ChunkRenderer::new(&gl);
-        render_chunk.update_blocks(&gl, blocks.view());
+        let mut input_state = InputState {
+            keys: HashSet::new(),
+            mouse_state: event_pump.mouse_state(),
+            blocked_mouse: imgui.io().want_capture_mouse,
+            mouse_delta: Vec2::zero(),
+        };
+        let mut prev_input_state = input_state.clone();
+
+        let mut chunk_renderer = ChunkRenderer::new(&gl);
+        chunk_renderer.update_blocks(&gl, game.blocks.view());
 
         let projection =
             Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.0001);
 
-        let mut camera = Camera {
-            position: Vec3::new(8.0, 18.0, 8.0),
-            pitch: 0.0,
-            yaw: 0.0,
-        };
+        const TICK_RATE: u32 = 20;
+        const TICK_DELTA: f32 = 1.0 / TICK_RATE as f32;
 
         let mut last = sdl.timer().unwrap().performance_counter();
-        let mut prev_mouse_state = event_pump.mouse_state();
         let mut fps = 0.0;
         let mut running = true;
+        let mut accumulator = 0.0;
         while running {
             let now = sdl.timer().unwrap().performance_counter();
             let dt = (now - last) as f32 / sdl.timer().unwrap().performance_frequency() as f32;
+            accumulator += dt;
             last = now;
 
             fps = fps * (1.0 - 0.1) + (1.0 / dt) * 0.1;
-
-            imgui_platform.prepare_frame(&mut imgui, &window, &event_pump);
-            let ui = imgui.new_frame();
-            ui.window("Debug")
-                .position([0.0, 0.0], imgui::Condition::Always)
-                .always_auto_resize(true)
-                .build(|| {
-                    ui.text(format!("FPS: {:.0}", fps));
-                    ui.text(format!("Position: {:.2}", camera.position));
-                    ui.text(format!(
-                        "Orientation: {:.2} {:.2} ({:.2})",
-                        camera.yaw,
-                        camera.pitch,
-                        camera.look_at()
-                    ));
-                });
 
             for event in event_pump.poll_iter() {
                 imgui_platform.handle_event(&mut imgui, &event);
@@ -155,13 +133,11 @@ fn main() {
                 }
             }
 
-            let mouse_state = event_pump.mouse_state();
-
             let mouse_position = Vec2::new(
                 event_pump.mouse_state().x() as f32,
                 event_pump.mouse_state().y() as f32,
             );
-            let mouse_movement = if sdl.mouse().relative_mouse_mode() {
+            let mouse_delta = if sdl.mouse().relative_mouse_mode() {
                 sdl.mouse().warp_mouse_in_window(
                     &window,
                     window.size().0 as i32 / 2,
@@ -169,74 +145,70 @@ fn main() {
                 );
                 (mouse_position
                     - Vec2::new(window.size().0 as f32 / 2.0, window.size().1 as f32 / 2.0))
-                    / 100.
+                    / 50.
             } else {
                 Vec2::zero()
             };
 
-            let mut keys: HashSet<_> = event_pump
+            let keys = event_pump
                 .keyboard_state()
                 .pressed_scancodes()
                 .filter_map(Keycode::from_scancode)
-                .collect();
-            if imgui.io().want_capture_keyboard {
-                keys.clear();
-            }
-
-            let fwd_bck = keys.contains(&Keycode::W) as i8 - keys.contains(&Keycode::S) as i8;
-            let rgh_lft = keys.contains(&Keycode::D) as i8 - keys.contains(&Keycode::A) as i8;
-            let up_down =
-                keys.contains(&Keycode::Space) as i8 - keys.contains(&Keycode::LShift) as i8;
-
-            camera.rotate_horizontal(mouse_movement.x);
-            camera.rotate_vertical(mouse_movement.y);
-
-            let position_before = camera.position;
-            camera.move_forward(fwd_bck as f32 * 3.0 * dt);
-            camera.move_right(rgh_lft as f32 * 3.0 * dt);
-            camera.move_up(up_down as f32 * 3.0 * dt);
-            if camera.position.floor().map(|e| e as i32)
-                != position_before.floor().map(|e| e as i32)
-            {
-                let position_below = (camera.position - Vec3::new(0.0, 1.0, 0.0)).floor();
-
-                if let (Some(Some(Some(_))), _) | (_, Some(Some(Some(_)))) = (
-                    (camera.position.map(|e| e.signum()).are_all_positive())
-                        .then(|| blocks.get(camera.position.floor().map(|e| e as _).into_tuple())),
-                    (position_below.map(|e| e.signum()).are_all_positive())
-                        .then(|| blocks.get(position_below.map(|e| e as usize).into_tuple())),
-                ) {
-                    camera.position = position_before;
-                }
-            }
-
-            let highlighted = raycast(camera.position, camera.look_at(), 7.5, blocks.view());
-            if let Some(highlighted) = highlighted {
-                if !imgui.io().want_capture_mouse && mouse_state.left() && !prev_mouse_state.left()
-                {
-                    blocks[highlighted.position.map(|e| e as _).into_tuple()] = None;
-                    render_chunk.update_blocks(&gl, blocks.view());
-                }
-            }
-
-            if let Some(highlighted) = highlighted {
-                if !imgui.io().want_capture_mouse
-                    && mouse_state.right()
-                    && !prev_mouse_state.right()
-                {
-                    let position = highlighted.position + highlighted.normal.map(|e| e as i32);
-
-                    if let Some(entry) = blocks.get_mut(position.map(|e| e as _).into_tuple()) {
-                        *entry = Some(Block { position, id: 0 });
-                        render_chunk.update_blocks(&gl, blocks.view());
+                .collect::<HashSet<_>>()
+                .apply(|keys| {
+                    if imgui.io().want_capture_keyboard {
+                        keys.clear();
                     }
+                });
+
+            input_state = InputState {
+                keys: keys.clone(),
+                mouse_state: event_pump.mouse_state(),
+                blocked_mouse: imgui.io().want_capture_mouse,
+                mouse_delta,
+            };
+
+            while accumulator >= TICK_DELTA {
+                let mut new_game = game.clone();
+                new_game.update(&game, &prev_input_state, &input_state);
+
+                prev_game = game;
+                game = new_game;
+
+                prev_input_state = input_state.clone();
+
+                input_state.keys.clear();
+                input_state.mouse_state = MouseState::from_sdl_state(0);
+                input_state.mouse_delta = Vec2::zero();
+
+                if prev_game.blocks != game.blocks {
+                    chunk_renderer.update_blocks(&gl, game.blocks.view());
                 }
+
+                accumulator -= TICK_DELTA;
             }
 
-            prev_mouse_state = mouse_state;
+            imgui_platform.prepare_frame(&mut imgui, &window, &event_pump);
+            let ui = imgui.new_frame();
+            ui.window("Debug")
+                .position([0.0, 0.0], imgui::Condition::Always)
+                .always_auto_resize(true)
+                .build(|| {
+                    ui.text(format!("FPS: {:.0}", fps));
+                    ui.text(format!("Position: {:.2}", game.camera.position));
+                    ui.text(format!(
+                        "Orientation: {:.2} {:.2} ({:.2})",
+                        game.camera.yaw.0,
+                        game.camera.pitch.0,
+                        game.camera.look_at()
+                    ));
+                });
+
+            let alpha = accumulator / TICK_DELTA;
+            let interpolated_game = prev_game.blend(&game, alpha);
 
             let model = Mat4::<f32>::identity();
-            let mvp = projection * camera.to_matrix() * model;
+            let mvp = projection * interpolated_game.camera.to_matrix() * model;
 
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
@@ -246,7 +218,8 @@ fn main() {
                 false,
                 mvp.as_col_slice(),
             );
-            let uniform_highlighted = highlighted
+            let uniform_highlighted = interpolated_game
+                .look_at_raycast
                 .map(|v| v.position.map(|e| e as f32))
                 .unwrap_or(Vec3::new(f32::NAN, f32::NAN, f32::NAN));
             gl.uniform_3_f32(
@@ -260,7 +233,7 @@ fn main() {
             );
 
             gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(block_array_texture));
-            render_chunk.draw(&gl);
+            chunk_renderer.draw(&gl);
 
             let size = Vec2::new(48.0, 48.0);
             let screen_mat = Mat3::<f32>::scaling_3d((size / Vec2::new(1024.0, 768.0)).with_z(1.0))

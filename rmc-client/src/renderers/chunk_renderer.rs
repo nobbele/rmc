@@ -233,10 +233,10 @@ impl ChunkRenderer {
             glow::ARRAY_BUFFER,
             bytemuck::cast_slice::<_, u8>(
                 blocks
-                    .iter()
-                    .filter_map(|b| b.as_ref())
-                    .map(|block| Instance {
-                        position: block.position.map(|e| e as f32),
+                    .indexed_iter()
+                    .filter_map(|(pos, block)| block.as_ref().map(|b| (pos, b)))
+                    .map(|(pos, block)| Instance {
+                        position: Vec3::new(pos.0 as f32, pos.1 as f32, pos.2 as f32),
                         texture: block.id,
                     })
                     .collect::<Vec<_>>()
