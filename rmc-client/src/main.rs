@@ -2,7 +2,7 @@ use glow::HasContext;
 use renderers::ScreenQuadRenderer;
 use rmc_common::{game::InputState, lerp, Apply, Blend, Game, LookBack};
 use sdl2::{event::Event, keyboard::Keycode, mouse::MouseState};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use texture::{load_texture, DataSource};
 use vek::Vec2;
 
@@ -147,18 +147,15 @@ fn main() {
                 mouse_delta,
             });
 
+            // TODO Fix input handling being skipped.
             while accumulator >= TICK_DELTA {
-                game.push(
-                    game.curr
-                        .clone()
-                        .apply(|game| game.update(&input_state.prev, &input_state.curr)),
-                );
+                game.push_from(|_prev, game| game.update(&input_state.prev, &input_state.curr));
 
-                input_state.push(input_state.curr.clone().apply(|input_state| {
+                input_state.push_from(|_prev, input_state| {
                     input_state.keys.clear();
                     input_state.mouse_state = MouseState::from_sdl_state(0);
                     input_state.mouse_delta = Vec2::zero();
-                }));
+                });
 
                 if game.prev.blocks != game.curr.blocks {
                     game_renderer
