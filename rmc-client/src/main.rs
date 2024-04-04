@@ -2,7 +2,7 @@ use glow::HasContext;
 use renderers::ScreenQuadRenderer;
 use rmc_common::{game::InputState, lerp, Apply, Blend, Game, LookBack};
 use sdl2::{event::Event, keyboard::Keycode, mouse::MouseState};
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use texture::{load_texture, DataSource};
 use vek::Vec2;
 
