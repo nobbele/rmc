@@ -9,5 +9,7 @@ edition = "2021"
 ndarray = "0.15.6"
 vek = "0.16.1"
 
+# imgui = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
+
 # Needed for keycodes
 sdl2 = "0.36"

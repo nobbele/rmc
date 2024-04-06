@@ -1,17 +1,17 @@
-pub mod world;
-
-mod camera;
+use ndarray::Array3;
 use std::{
     ops::{Add, Mul, Sub},
     rc::Rc,
 };
+use vek::Vec3;
 
+pub mod world;
+
+mod camera;
 pub use camera::Camera;
-
 pub mod game;
 pub use game::Game;
-use ndarray::Array3;
-use vek::Vec3;
+pub mod input;
 
 pub trait Blend {
     fn blend(&self, other: &Self, alpha: f32) -> Self;
