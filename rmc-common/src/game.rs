@@ -1,5 +1,3 @@
-use std::{cmp::Ordering, ops::Div, rc::Rc};
-
 use crate::{
     camera::Angle,
     input::InputState,
@@ -9,18 +7,23 @@ use crate::{
 use lazy_static::lazy_static;
 use ndarray::Array3;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
+use std::rc::Rc;
 use vek::Vec3;
 
 pub const TICK_RATE: u32 = 32;
+pub const TICK_SPEED: f32 = 1.0;
 pub const TICK_DELTA: f32 = 1.0 / TICK_RATE as f32;
 
 const GRAVITY: f32 = 16.0;
 const JUMP_HEIGHT: f32 = 1.0;
 lazy_static! {
     // sqrt isn't const fn :/
-    pub static ref JUMP_STRENGTH: f32 = (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
+    pub static ref JUMP_STRENGTH: f32 = 1.2 * (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
 }
 const SPEED: f32 = 4.0;
+
+const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 2.0, 0.2);
+const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 
 #[derive(Clone)]
 pub struct Game {
@@ -45,13 +48,13 @@ impl Game {
             }
         }
 
-        // blocks[(8, 8, 8)] = Some(Block { id: 1 });
+        // blocks[(8, 15, 8)] = Some(Block { id: 1 });
 
         Game {
             blocks: Rc::new(blocks),
 
             camera: Camera {
-                position: Vec3::new(8.0, 18.0, 8.0),
+                position: Vec3::new(8.5, 18.0, 8.5),
                 pitch: Angle(0.0),
                 yaw: Angle(0.0),
             },
@@ -64,7 +67,7 @@ impl Game {
     }
 
     pub fn update(&mut self, input: &InputState) {
-        // let initial = self.clone();
+        let initial = self.clone();
 
         self.handle_camera_movement(input);
         self.handle_movement(input);
@@ -72,7 +75,7 @@ impl Game {
         self.velocity.y -= GRAVITY * TICK_DELTA;
         self.camera.position += self.velocity * TICK_DELTA;
 
-        self.handle_collision();
+        self.handle_collision(&initial);
 
         self.look_at_raycast = raycast(
             self.camera.position,
@@ -105,51 +108,56 @@ impl Game {
         }
     }
 
-    // TODO Still not perfect!!!
-    fn handle_collision(&mut self) {
+    // TODO Still not great!!
+    // Works much better in positive direction than negative for some reason?
+    fn handle_collision(&mut self, initial: &Game) {
         self.on_ground = false;
 
-        const MAX_COLLISIONS_TESTS_PER_FRAME: usize = 4;
-        'retry_loop: for _ in 0..MAX_COLLISIONS_TESTS_PER_FRAME {
-            let mut collided = false;
+        let player_box = AABB {
+            position: initial.camera.position - PLAYER_ORIGIN,
+            size: PLAYER_SIZE,
+        };
 
-            'block_loop: for (idx, _block) in self
-                .blocks
-                .indexed_iter()
-                .filter_map(|(idx, block)| block.map(|b| (idx, b)))
-            {
-                if self.blocks.get(idx).is_none() {
-                    continue;
-                }
-
-                let camera_box = AABB {
-                    position: self.camera.position + Vec3::new(-0.1, -1.5, -0.1),
-                    size: Vec3::new(0.2, 2.0, 0.2),
-                };
-
-                if let Some(mtv) = sat_test(
-                    camera_box,
-                    AABB {
-                        position: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32),
-                        size: Vec3::one(),
-                    },
-                ) {
-                    // println!("mtv: {}", mtv);
-                    self.camera.position += mtv;
-                    self.velocity = Vec3::zero();
-
-                    if mtv.y >= 0.0 {
-                        self.on_ground = true;
-                    }
-
-                    collided = true;
-                    break 'block_loop;
-                }
+        for (idx, _block) in self
+            .blocks
+            .indexed_iter()
+            .filter_map(|(idx, block)| block.map(|b| (idx, b)))
+        {
+            if self.blocks.get(idx).is_none() {
+                continue;
             }
 
-            // If we never collided with anything this iteration, there's no need to check for collisions anymore this frame.
-            if !collided {
-                break 'retry_loop;
+            let block_box = AABB {
+                position: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32),
+                size: Vec3::one(),
+            };
+
+            if player_box.intersects(block_box.scaled(1.0 - f32::EPSILON)) {
+                panic!("Camera cannot be inside a block");
+            }
+
+            let camera_velocity = self.camera.position - initial.camera.position;
+
+            if let Some(SweepTestResult { normal, time }) = sweep_test(
+                SweepBox {
+                    position: player_box.position,
+                    size: player_box.size,
+                    velocity: camera_velocity,
+                },
+                block_box,
+            ) {
+                self.camera.position = initial.camera.position + camera_velocity * time;
+
+                // Sliding
+                let remaining_time = 1.0 - time;
+                let remaining_velocity = camera_velocity * remaining_time;
+                let projected_velocity =
+                    remaining_velocity - remaining_velocity.dot(normal) * normal;
+                self.camera.position += projected_velocity;
+
+                if normal.y > 0.0 {
+                    self.on_ground = true;
+                }
             }
         }
     }
@@ -227,127 +235,310 @@ pub fn test_game_state_size() {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct AABB {
-    position: Vec3<f32>,
-    size: Vec3<f32>,
+pub struct AABB {
+    pub position: Vec3<f32>,
+    pub size: Vec3<f32>,
 }
 
-/// Returns the minimum translation vector between two bounding boxes.
-fn sat_test(a: AABB, b: AABB) -> Option<Vec3<f32>> {
-    let Some(sat_x) = sat_axis_test_index(0, a, b) else {
-        return None;
-    };
-    let Some(sat_y) = sat_axis_test_index(1, a, b) else {
-        return None;
-    };
-    let Some(sat_z) = sat_axis_test_index(2, a, b) else {
-        return None;
-    };
+impl AABB {
+    pub fn scaled(self, s: f32) -> Self {
+        AABB {
+            position: self.position + self.size * (1.0 - s),
+            size: self.size * s,
+        }
+    }
 
-    let min_sat = [sat_x, sat_y, sat_z]
-        .into_iter()
-        .min_by(|a, b| {
-            a.magnitude_squared()
-                .partial_cmp(&b.magnitude_squared())
-                .unwrap_or(Ordering::Equal)
-        })
-        .unwrap();
+    pub fn min_x(self) -> f32 {
+        self.position.x
+    }
 
-    Some(min_sat)
+    pub fn min_y(self) -> f32 {
+        self.position.y
+    }
+
+    pub fn min_z(self) -> f32 {
+        self.position.z
+    }
+
+    pub fn max_x(self) -> f32 {
+        self.min_x() + self.size.x
+    }
+
+    pub fn max_y(self) -> f32 {
+        self.min_y() + self.size.y
+    }
+
+    pub fn max_z(self) -> f32 {
+        self.min_z() + self.size.z
+    }
+
+    pub fn intersects(self, other: AABB) -> bool {
+        (self.max_x() > other.min_x()
+            && self.max_y() > other.min_y()
+            && self.max_z() > other.min_z())
+            && (self.min_x() < other.max_x()
+                && self.min_y() < other.max_y()
+                && self.min_z() < other.max_z())
+    }
 }
 
-fn sat_axis_test_index(axis_idx: usize, a: AABB, b: AABB) -> Option<Vec3<f32>> {
-    sat_axis_test(
-        if axis_idx == 0 {
-            Vec3::unit_x()
-        } else if axis_idx == 1 {
-            Vec3::unit_y()
-        } else if axis_idx == 2 {
-            Vec3::unit_z()
+// https://www.gamedev.net/tutorials/programming/general-and-gameplay-programming/swept-aabb-collision-detection-and-response-r3084/
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SweepBox {
+    pub position: Vec3<f32>,
+    pub size: Vec3<f32>,
+    pub velocity: Vec3<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+// A normal of zero and travel of zero means the movement is already perfectly aligned.
+pub struct SweepTestResult {
+    pub normal: Vec3<f32>,
+    pub time: f32,
+}
+
+pub fn sweep_test(a: SweepBox, b: AABB) -> Option<SweepTestResult> {
+    fn calc_axis_abs(a_min: f32, a_max: f32, b_min: f32, b_max: f32, direction: f32) -> (f32, f32) {
+        if direction > 0.0 {
+            (b_min - a_max, b_max - a_min)
         } else {
-            panic!()
-        },
-        a.position[axis_idx],
-        a.position[axis_idx] + a.size[axis_idx],
-        b.position[axis_idx],
-        b.position[axis_idx] + b.size[axis_idx],
-    )
-}
+            (b_max - a_min, b_min - a_max)
+        }
+    }
+    fn calc_axis_abs_aabb(a: SweepBox, b: AABB, velocity: Vec3<f32>, axis: usize) -> (f32, f32) {
+        calc_axis_abs(
+            a.position[axis],
+            a.position[axis] + a.size[axis],
+            b.position[axis],
+            b.position[axis] + b.size[axis],
+            velocity[axis],
+        )
+    }
+    fn calc_axis_rel(enter: f32, exit: f32, velocity: f32) -> (f32, f32) {
+        if velocity == 0.0 {
+            (-f32::INFINITY, f32::INFINITY)
+        } else {
+            (enter / velocity, exit / velocity)
+        }
+    }
+    let (x_abs_enter, x_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 0);
+    let (y_abs_enter, y_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 1);
+    let (z_abs_enter, z_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 2);
 
-/// Implements SAT (Seperating Axis Theorem)
-fn sat_axis_test(
-    axis: Vec3<f32>,
-    min_a: f32,
-    max_a: f32,
-    min_b: f32,
-    max_b: f32,
-) -> Option<Vec3<f32>> {
-    let axis_mag = axis.magnitude();
-    if axis_mag < 0.01 {
+    let (x_enter, x_exit) = calc_axis_rel(x_abs_enter, x_abs_exit, a.velocity.x);
+    let (y_enter, y_exit) = calc_axis_rel(y_abs_enter, y_abs_exit, a.velocity.y);
+    let (z_enter, z_exit) = calc_axis_rel(z_abs_enter, z_abs_exit, a.velocity.z);
+
+    let entry_time = x_enter.max(y_enter).max(z_enter);
+    let exit_time = x_exit.min(y_exit).min(z_exit);
+
+    if entry_time > exit_time
+        || (x_enter < 0.0 && y_enter < 0.0 && z_enter < 0.0)
+        || x_enter > 1.0
+        || y_enter > 1.0
+        || z_enter > 1.0
+    {
         return None;
     }
 
-    let d0 = max_b - min_a;
-    let d1 = max_a - min_b;
-
-    if d0 <= 0.0 || d1 <= 0.0 {
-        return None;
+    fn norm(v: f32, vel: f32) -> f32 {
+        if v != 0.0 {
+            -v.signum()
+        } else {
+            -vel.signum()
+        }
     }
 
-    let overlap = if d0 < d1 { d0 } else { -d1 };
+    let x_norm = norm(x_abs_enter, a.velocity.x);
+    let y_norm = norm(y_abs_enter, a.velocity.y);
+    let z_norm = norm(z_abs_enter, a.velocity.z);
 
-    Some(axis * (overlap / axis_mag))
+    let normal = if x_enter > y_enter && x_enter > z_enter {
+        Vec3::new(x_norm, 0.0, 0.0)
+    } else if y_enter > x_enter && y_enter > z_enter {
+        Vec3::new(0.0, y_norm, 0.0)
+    } else if z_enter > x_enter && z_enter > y_enter {
+        Vec3::new(0.0, 0.0, z_norm)
+    }
+    // Edges and corners
+    else {
+        // x,y edge
+        if x_enter > z_enter && y_enter > z_enter {
+            Vec3::new(x_norm, y_norm, 0.0).normalized()
+        }
+        // x,z edge
+        else if x_enter > y_enter && z_enter > y_enter {
+            Vec3::new(x_norm, 0.0, z_norm).normalized()
+        }
+        // y,z edge
+        else if y_enter > x_enter && z_enter > x_enter {
+            Vec3::new(0.0, y_norm, z_norm).normalized()
+        }
+        // x,y,z corner
+        else {
+            Vec3::new(x_norm, y_norm, z_norm).normalized()
+        }
+    };
+
+    Some(SweepTestResult {
+        normal,
+        time: entry_time,
+    })
 }
 
 #[test]
-pub fn test_sat_test() {
+pub fn test_sweep_test() {
     assert_eq!(
-        sat_test(
-            AABB {
+        sweep_test(
+            SweepBox {
                 position: Vec3::zero(),
-                size: Vec3::one()
+                size: Vec3::one(),
+                velocity: Vec3::new(0.5, 0.0, 0.0),
             },
             AABB {
-                position: Vec3::one() * 2.0,
+                position: Vec3::new(2.0, 2.0, 0.0),
                 size: Vec3::one()
             }
         ),
         None
     );
-
     assert_eq!(
-        sat_test(
-            AABB {
+        sweep_test(
+            SweepBox {
                 position: Vec3::zero(),
-                size: Vec3::one()
+                size: Vec3::one(),
+                velocity: Vec3::new(1.2, 0.0, 0.0),
             },
             AABB {
-                position: Vec3::new(0.0, 0.8, 0.0),
+                position: Vec3::new(2.0, 2.0, 0.0),
                 size: Vec3::one()
             }
         ),
-        Some(Vec3 {
-            x: -0.0,
-            y: -0.19999999,
-            z: -0.0
+        Some(SweepTestResult {
+            normal: Vec3::new(-1.0, 0.0, 0.0),
+            time: 0.8333333,
         })
     );
 
     assert_eq!(
-        sat_test(
-            AABB {
+        sweep_test(
+            SweepBox {
                 position: Vec3::zero(),
-                size: Vec3::one()
+                size: Vec3::one(),
+                velocity: Vec3::new(1.2, 1.3, 0.0),
             },
             AABB {
-                position: Vec3::new(0.8, 0.8, 0.0),
+                position: Vec3::new(2.0, 2.0, 0.0),
                 size: Vec3::one()
             }
         ),
-        Some(Vec3 {
-            x: -0.19999999,
-            y: -0.0,
-            z: -0.0
+        Some(SweepTestResult {
+            normal: Vec3 {
+                x: -1.0,
+                y: 0.0,
+                z: 0.0
+            },
+            time: 0.8333333
+        })
+    );
+
+    assert_eq!(
+        sweep_test(
+            SweepBox {
+                position: Vec3::zero(),
+                size: Vec3::one(),
+                velocity: Vec3::new(1.2, 1.2, 0.0),
+            },
+            AABB {
+                position: Vec3::new(2.0, 2.0, 0.0),
+                size: Vec3::one()
+            }
+        ),
+        Some(SweepTestResult {
+            normal: Vec3 {
+                x: -0.70710677,
+                y: -0.70710677,
+                z: 0.0
+            },
+            time: 0.8333333
+        })
+    );
+
+    assert_eq!(
+        sweep_test(
+            SweepBox {
+                position: Vec3::new(0.5, 1.5, 0.5),
+                size: Vec3::one(),
+                velocity: Vec3::new(0.0, -0.1, 0.0),
+            },
+            AABB {
+                position: Vec3::one(),
+                size: Vec3::one()
+            }
+        ),
+        None
+    );
+    assert_eq!(
+        sweep_test(
+            SweepBox {
+                position: Vec3::new(0.5, 1.1, 0.5),
+                size: Vec3::one(),
+                velocity: Vec3::new(0.0, -0.2, 0.0),
+            },
+            AABB {
+                position: Vec3::zero(),
+                size: Vec3::one()
+            }
+        ),
+        Some(SweepTestResult {
+            normal: Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            },
+            time: 0.5000001
+        })
+    );
+    assert_eq!(
+        sweep_test(
+            SweepBox {
+                position: Vec3::new(0.5, 2.1, 0.5),
+                size: Vec3::one(),
+                velocity: Vec3::new(0.0, -0.2, 0.0),
+            },
+            AABB {
+                position: Vec3::one(),
+                size: Vec3::one()
+            }
+        ),
+        Some(SweepTestResult {
+            normal: Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            },
+            time: 0.49999952
+        })
+    );
+    assert_eq!(
+        dbg!(sweep_test(
+            SweepBox {
+                position: Vec3::new(0.5, 1.1, 0.5),
+                size: Vec3::one(),
+                velocity: Vec3::new(0.0, -0.4, 0.0),
+            },
+            AABB {
+                position: Vec3::zero(),
+                size: Vec3::one()
+            }
+        )),
+        Some(SweepTestResult {
+            normal: Vec3 {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0
+            },
+            time: 0.25000006
         })
     );
 }

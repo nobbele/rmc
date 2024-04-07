@@ -1,7 +1,7 @@
 use glow::HasContext;
 use renderers::ScreenQuadRenderer;
 use rmc_common::{
-    game::TICK_DELTA,
+    game::{TICK_DELTA, TICK_SPEED},
     input::{ButtonBuffer, ButtonStateEvent, InputState, KeyboardEvent, MouseButtonEvent},
     lerp, Blend, Game, LookBack,
 };
@@ -96,7 +96,7 @@ fn main() {
             sdl_time.push(sdl.timer().unwrap().performance_counter());
             let dt = (sdl_time.curr - sdl_time.prev) as f32
                 / sdl.timer().unwrap().performance_frequency() as f32;
-            accumulator += dt;
+            accumulator += dt * TICK_SPEED;
 
             fps = lerp(fps, 1.0 / dt, 0.1);
 
@@ -220,6 +220,7 @@ fn main() {
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
             game_renderer.draw(&gl, &game.prev.blend(&game.curr, accumulator / TICK_DELTA));
+            // game_renderer.draw(&gl, &game.curr);
             screen_quad_renderer.draw(&gl, crosshair_texture);
             imgui_renderer
                 .render(&gl, &imgui_textures, imgui.render())

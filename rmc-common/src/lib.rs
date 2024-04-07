@@ -1,9 +1,12 @@
 use ndarray::Array3;
 use std::{
-    ops::{Add, Mul, Sub},
+    ops::{Add, Mul, Neg, Sub},
     rc::Rc,
 };
-use vek::Vec3;
+use vek::{
+    num_traits::{One, Zero},
+    Vec3,
+};
 
 pub mod world;
 
@@ -157,4 +160,20 @@ fn test_look_back() {
 
     assert_eq!(a.prev, 2.0);
     assert_eq!(a.curr, 3.0);
+}
+
+pub trait SignNum2 {
+    fn signum2(&self) -> Self;
+}
+
+impl<T: Zero + One + Neg<Output = T> + PartialOrd> SignNum2 for T {
+    fn signum2(&self) -> Self {
+        if self > &Self::zero() {
+            Self::one()
+        } else if self < &Self::zero() {
+            -Self::one()
+        } else {
+            Self::zero()
+        }
+    }
 }
