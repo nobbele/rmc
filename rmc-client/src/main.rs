@@ -214,6 +214,7 @@ fn main() {
                         game.curr.camera.pitch.0,
                         game.curr.camera.look_at()
                     ));
+                    ui.text(format!("On Ground: {}", game.curr.on_ground));
                 });
 
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);

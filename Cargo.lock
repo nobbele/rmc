@@ -924,6 +924,7 @@ dependencies = [
 name = "rmc-common"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "ndarray",
  "sdl2",
  "vek",

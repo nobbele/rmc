@@ -62,18 +62,6 @@ impl<T: Blend + Default + Clone> Blend for Array3<T> {
     }
 }
 
-impl<T: DiscreteBlend + Clone> Blend for T {
-    fn blend(&self, other: &Self, alpha: f32) -> Self {
-        if alpha < 0.5 {
-            self.clone()
-        } else {
-            other.clone()
-        }
-    }
-}
-
-pub trait DiscreteBlend {}
-
 impl<T: Blend + Clone> Blend for Option<T> {
     fn blend(&self, other: &Self, alpha: f32) -> Self {
         if let (Some(a), Some(b)) = (self, other) {
@@ -87,6 +75,20 @@ impl<T: Blend + Clone> Blend for Option<T> {
         }
     }
 }
+
+impl<T: DiscreteBlend + Clone> Blend for T {
+    fn blend(&self, other: &Self, alpha: f32) -> Self {
+        if alpha < 0.5 {
+            self.clone()
+        } else {
+            other.clone()
+        }
+    }
+}
+
+pub trait DiscreteBlend {}
+
+impl DiscreteBlend for bool {}
 
 pub trait Apply: Sized {
     /// Apply a function to this value and return the (possibly) modified value.

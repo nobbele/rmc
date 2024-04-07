@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, rc::Rc};
+use std::{cmp::Ordering, ops::Div, rc::Rc};
 
 use crate::{
     camera::Angle,
@@ -6,6 +6,7 @@ use crate::{
     world::{raycast, Block, RaycastOutput},
     Blend, Camera,
 };
+use lazy_static::lazy_static;
 use ndarray::Array3;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
 use vek::Vec3;
@@ -13,7 +14,12 @@ use vek::Vec3;
 pub const TICK_RATE: u32 = 32;
 pub const TICK_DELTA: f32 = 1.0 / TICK_RATE as f32;
 
-const GRAVITY: f32 = 8.0;
+const GRAVITY: f32 = 16.0;
+const JUMP_HEIGHT: f32 = 1.0;
+lazy_static! {
+    // sqrt isn't const fn :/
+    pub static ref JUMP_STRENGTH: f32 = (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
+}
 const SPEED: f32 = 4.0;
 
 #[derive(Clone)]
@@ -22,6 +28,8 @@ pub struct Game {
 
     pub camera: Camera,
     pub velocity: Vec3<f32>,
+
+    pub on_ground: bool,
 
     pub look_at_raycast: Option<RaycastOutput>,
 }
@@ -48,6 +56,8 @@ impl Game {
                 yaw: Angle(0.0),
             },
             velocity: Vec3::zero(),
+
+            on_ground: false,
 
             look_at_raycast: None,
         }
@@ -89,11 +99,16 @@ impl Game {
         self.camera
             .move_forward(fwd_bck as f32 * SPEED * TICK_DELTA);
         self.camera.move_right(rgh_lft as f32 * SPEED * TICK_DELTA);
-        self.camera.move_up(up_down as f32 * SPEED * TICK_DELTA);
+
+        if self.on_ground {
+            self.velocity.y = up_down as f32 * *JUMP_STRENGTH;
+        }
     }
 
     // TODO Still not perfect!!!
     fn handle_collision(&mut self) {
+        self.on_ground = false;
+
         const MAX_COLLISIONS_TESTS_PER_FRAME: usize = 4;
         'retry_loop: for _ in 0..MAX_COLLISIONS_TESTS_PER_FRAME {
             let mut collided = false;
@@ -107,21 +122,25 @@ impl Game {
                     continue;
                 }
 
-                let camera_box = BoundingBox {
+                let camera_box = AABB {
                     position: self.camera.position + Vec3::new(-0.1, -1.5, -0.1),
                     size: Vec3::new(0.2, 2.0, 0.2),
                 };
 
                 if let Some(mtv) = sat_test(
                     camera_box,
-                    BoundingBox {
+                    AABB {
                         position: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32),
                         size: Vec3::one(),
                     },
                 ) {
-                    println!("mtv: {}", mtv);
+                    // println!("mtv: {}", mtv);
                     self.camera.position += mtv;
                     self.velocity = Vec3::zero();
+
+                    if mtv.y >= 0.0 {
+                        self.on_ground = true;
+                    }
 
                     collided = true;
                     break 'block_loop;
@@ -187,6 +206,8 @@ impl Blend for Game {
             camera: self.camera.blend(&other.camera, alpha),
             velocity: self.velocity.blend(&other.velocity, alpha),
 
+            on_ground: self.on_ground.blend(&other.on_ground, alpha),
+
             look_at_raycast: self.look_at_raycast.blend(&other.look_at_raycast, alpha),
         }
     }
@@ -205,14 +226,14 @@ pub fn test_game_state_size() {
     );
 }
 
-#[derive(Debug, Clone, Copy)]
-struct BoundingBox {
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct AABB {
     position: Vec3<f32>,
     size: Vec3<f32>,
 }
 
 /// Returns the minimum translation vector between two bounding boxes.
-fn sat_test(a: BoundingBox, b: BoundingBox) -> Option<Vec3<f32>> {
+fn sat_test(a: AABB, b: AABB) -> Option<Vec3<f32>> {
     let Some(sat_x) = sat_axis_test_index(0, a, b) else {
         return None;
     };
@@ -222,9 +243,6 @@ fn sat_test(a: BoundingBox, b: BoundingBox) -> Option<Vec3<f32>> {
     let Some(sat_z) = sat_axis_test_index(2, a, b) else {
         return None;
     };
-
-    // println!("{:#?} {:#?}", a, b);
-    // println!("{:?}", [sat_x, sat_y, sat_z]);
 
     let min_sat = [sat_x, sat_y, sat_z]
         .into_iter()
@@ -238,7 +256,7 @@ fn sat_test(a: BoundingBox, b: BoundingBox) -> Option<Vec3<f32>> {
     Some(min_sat)
 }
 
-fn sat_axis_test_index(axis_idx: usize, a: BoundingBox, b: BoundingBox) -> Option<Vec3<f32>> {
+fn sat_axis_test_index(axis_idx: usize, a: AABB, b: AABB) -> Option<Vec3<f32>> {
     sat_axis_test(
         if axis_idx == 0 {
             Vec3::unit_x()
@@ -285,11 +303,11 @@ fn sat_axis_test(
 pub fn test_sat_test() {
     assert_eq!(
         sat_test(
-            BoundingBox {
+            AABB {
                 position: Vec3::zero(),
                 size: Vec3::one()
             },
-            BoundingBox {
+            AABB {
                 position: Vec3::one() * 2.0,
                 size: Vec3::one()
             }
@@ -299,11 +317,11 @@ pub fn test_sat_test() {
 
     assert_eq!(
         sat_test(
-            BoundingBox {
+            AABB {
                 position: Vec3::zero(),
                 size: Vec3::one()
             },
-            BoundingBox {
+            AABB {
                 position: Vec3::new(0.0, 0.8, 0.0),
                 size: Vec3::one()
             }
@@ -317,11 +335,11 @@ pub fn test_sat_test() {
 
     assert_eq!(
         sat_test(
-            BoundingBox {
+            AABB {
                 position: Vec3::zero(),
                 size: Vec3::one()
             },
-            BoundingBox {
+            AABB {
                 position: Vec3::new(0.8, 0.8, 0.0),
                 size: Vec3::one()
             }
