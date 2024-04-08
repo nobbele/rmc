@@ -166,8 +166,10 @@ impl Game {
                 }
             }
 
-            collisions.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
-            let Some(SweepTestResult { normal, time }) = collisions.into_iter().next() else {
+            let Some(SweepTestResult { normal, time }) = collisions
+                .into_iter()
+                .min_by(|a, b| a.time.partial_cmp(&b.time).unwrap())
+            else {
                 break 'iteration_loop;
             };
 
