@@ -122,7 +122,6 @@ impl Game {
             };
 
             let player_velocity = self.camera.position - initial.camera.position;
-            // println!("{}", camera_velocity);
 
             let player_sweep = SweepBox {
                 position: player_box.position,
@@ -160,13 +159,8 @@ impl Game {
                     size: Vec3::one(),
                 };
 
-                // Broad phase
                 if block_box.intersects(broad_box) {
-                    // println!("{:?}", idx);
-
-                    // Narrow phase
                     if let Some(result) = sweep_test(player_sweep, block_box) {
-                        // println!("{} {}", result.normal, result.time);
                         collisions.push(result);
                     }
                 }
@@ -354,24 +348,12 @@ pub fn sweep_test(a: SweepBox, b: AABB) -> Option<SweepTestResult> {
     let (x_abs_enter, x_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 0);
     let (y_abs_enter, y_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 1);
     let (z_abs_enter, z_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 2);
-
-    // dbg!((x_abs_enter, y_abs_enter, z_abs_enter));
-    // dbg!((x_abs_exit, y_abs_exit, z_abs_exit));
-
     let (x_enter, x_exit) = calc_axis_rel(x_abs_enter, x_abs_exit, a.velocity.x);
     let (y_enter, y_exit) = calc_axis_rel(y_abs_enter, y_abs_exit, a.velocity.y);
     let (z_enter, z_exit) = calc_axis_rel(z_abs_enter, z_abs_exit, a.velocity.z);
 
-    // dbg!((x_enter, y_enter, z_enter));
-
     let entry_time = x_enter.max(y_enter).max(z_enter);
     let exit_time = x_exit.min(y_exit).min(z_exit);
-
-    // dbg!((entry_time, exit_time));
-
-    // if !x_enter.is_between01() || !y_enter.is_between01() || !z_enter.is_between01() {
-    //     return None;
-    // }
 
     if entry_time > exit_time
         || (x_enter < 0.0 && y_enter < 0.0 && z_enter < 0.0)
