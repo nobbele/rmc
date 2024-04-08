@@ -9,6 +9,7 @@ edition = "2021"
 ndarray = "0.15.6"
 vek = "0.16.1"
 lazy_static = "1.4.0"
+itertools = "0.12.1"
 
 # imgui = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
 

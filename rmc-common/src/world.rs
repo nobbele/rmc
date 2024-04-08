@@ -20,12 +20,12 @@ pub struct RaycastOutput {
 
 impl DiscreteBlend for RaycastOutput {}
 
-pub fn raycast_generalized<F: Fn(Vec3<i32>) -> bool>(
+pub fn raycast_generalized<F: FnMut(Vec3<i32>) -> bool>(
     pos: Vec3<f32>,
     dir: Vec3<f32>,
     radius: f32,
     voxel_size: f32,
-    has_voxel: F,
+    mut has_voxel: F,
 ) -> Option<RaycastOutput> {
     if dir.normalized().magnitude() == 0.0 {
         return None;
@@ -70,6 +70,10 @@ pub fn raycast_generalized<F: Fn(Vec3<i32>) -> bool>(
         grid_pos[min_axis] += step[min_axis];
         t_max[min_axis] += t_delta[min_axis];
 
+        if pos.distance(grid_pos.map(|e| e as f32)) > radius {
+            break;
+        }
+
         if has_voxel(grid_pos) {
             return Some(RaycastOutput {
                 position: grid_pos,
@@ -83,6 +87,15 @@ pub fn raycast_generalized<F: Fn(Vec3<i32>) -> bool>(
     }
 
     None
+}
+
+pub fn raycast_candidates(pos: Vec3<f32>, dir: Vec3<f32>, radius: f32) -> Vec<Vec3<i32>> {
+    let mut blocks = Vec::new();
+    raycast_generalized(pos, dir, radius, 1.0, |grid_pos| {
+        blocks.push(grid_pos);
+        false
+    });
+    blocks
 }
 
 pub fn raycast(
@@ -103,6 +116,62 @@ pub fn raycast(
 mod tests {
     use super::*;
     use ndarray::Array3;
+
+    #[test]
+    fn test_raycast_candidates() {
+        assert_eq!(
+            raycast_candidates(
+                vek::Vec3::new(8.0, 8.0, 0.0),
+                vek::Vec3::new(1.0, 0.4, 0.0),
+                4.0
+            ),
+            vec![
+                Vec3 { x: 8, y: 8, z: 0 },
+                Vec3 { x: 9, y: 8, z: 0 },
+                Vec3 { x: 10, y: 8, z: 0 },
+                Vec3 { x: 10, y: 9, z: 0 },
+                Vec3 { x: 11, y: 9, z: 0 }
+            ]
+        );
+        assert_eq!(
+            raycast_candidates(
+                vek::Vec3::new(8.0, 8.0, 0.0),
+                vek::Vec3::new(1.0, 0.0, 0.0),
+                4.0
+            ),
+            vec![
+                Vec3 { x: 8, y: 8, z: 0 },
+                Vec3 { x: 9, y: 8, z: 0 },
+                Vec3 { x: 10, y: 8, z: 0 },
+                Vec3 { x: 11, y: 8, z: 0 },
+                Vec3 { x: 12, y: 8, z: 0 }
+            ]
+        );
+
+        assert_eq!(
+            raycast_candidates(
+                vek::Vec3::new(8.0, 8.0, 0.0),
+                vek::Vec3::new(1.0, 0.0, 0.0),
+                4.0
+            ),
+            vec![
+                Vec3 { x: 8, y: 8, z: 0 },
+                Vec3 { x: 9, y: 8, z: 0 },
+                Vec3 { x: 10, y: 8, z: 0 },
+                Vec3 { x: 11, y: 8, z: 0 },
+                Vec3 { x: 12, y: 8, z: 0 }
+            ]
+        );
+
+        assert_eq!(
+            raycast_candidates(
+                vek::Vec3::new(8.0, 8.0, 0.0),
+                vek::Vec3::new(1.0, 0.0, 0.0),
+                0.1
+            ),
+            vec![Vec3 { x: 8, y: 8, z: 0 }]
+        );
+    }
 
     #[test]
     fn test_raycast2() {

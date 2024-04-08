@@ -10,7 +10,7 @@ use sdl2::{keyboard::Keycode, mouse::MouseButton};
 use std::rc::Rc;
 use vek::Vec3;
 
-pub const TICK_RATE: u32 = 32;
+pub const TICK_RATE: u32 = 16;
 pub const TICK_SPEED: f32 = 1.0;
 pub const TICK_DELTA: f32 = 1.0 / TICK_RATE as f32;
 
@@ -18,7 +18,7 @@ const GRAVITY: f32 = 16.0;
 const JUMP_HEIGHT: f32 = 1.0;
 lazy_static! {
     // sqrt isn't const fn :/
-    pub static ref JUMP_STRENGTH: f32 = 1.2 * (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
+    pub static ref JUMP_STRENGTH: f32 = 1.15 * (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
 }
 const SPEED: f32 = 4.0;
 
@@ -48,6 +48,7 @@ impl Game {
             }
         }
 
+        // blocks[(7, 15, 8)] = Some(Block { id: 1 });
         // blocks[(8, 15, 8)] = Some(Block { id: 1 });
 
         Game {
@@ -108,56 +109,84 @@ impl Game {
         }
     }
 
-    // TODO Still not great!!
-    // Works much better in positive direction than negative for some reason?
+    // TODO use vek::Aabb
     fn handle_collision(&mut self, initial: &Game) {
         self.on_ground = false;
 
-        let player_box = AABB {
-            position: initial.camera.position - PLAYER_ORIGIN,
-            size: PLAYER_SIZE,
-        };
+        const MAX_ITERATIONS: usize = 8;
 
-        for (idx, _block) in self
-            .blocks
-            .indexed_iter()
-            .filter_map(|(idx, block)| block.map(|b| (idx, b)))
-        {
-            if self.blocks.get(idx).is_none() {
-                continue;
-            }
-
-            let block_box = AABB {
-                position: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32),
-                size: Vec3::one(),
+        'iteration_loop: for _ in 0..MAX_ITERATIONS {
+            let player_box = AABB {
+                position: initial.camera.position - PLAYER_ORIGIN,
+                size: PLAYER_SIZE,
             };
 
-            if player_box.intersects(block_box.scaled(1.0 - f32::EPSILON)) {
-                panic!("Camera cannot be inside a block");
+            let player_velocity = self.camera.position - initial.camera.position;
+            // println!("{}", camera_velocity);
+
+            let player_sweep = SweepBox {
+                position: player_box.position,
+                size: player_box.size,
+                velocity: player_velocity,
+            };
+
+            let broad_box = AABB {
+                position: player_box.position.zip(player_velocity).map(|(p, v)| {
+                    if v > 0.0 {
+                        p
+                    } else {
+                        p + v
+                    }
+                }),
+                size: player_box
+                    .size
+                    .zip(player_velocity)
+                    .map(|(s, v)| s + v.abs()),
+            };
+
+            let mut collisions = Vec::new();
+
+            for (idx, _block) in self
+                .blocks
+                .indexed_iter()
+                .filter_map(|(idx, block)| block.map(|b| (idx, b)))
+                // WTF How does this improve the collision detection???
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+            {
+                let block_box = AABB {
+                    position: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32),
+                    size: Vec3::one(),
+                };
+
+                // Broad phase
+                if block_box.intersects(broad_box) {
+                    // println!("{:?}", idx);
+
+                    // Narrow phase
+                    if let Some(result) = sweep_test(player_sweep, block_box) {
+                        // println!("{} {}", result.normal, result.time);
+                        collisions.push(result);
+                    }
+                }
             }
 
-            let camera_velocity = self.camera.position - initial.camera.position;
+            collisions.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap());
+            let Some(SweepTestResult { normal, time }) = collisions.into_iter().next() else {
+                break 'iteration_loop;
+            };
 
-            if let Some(SweepTestResult { normal, time }) = sweep_test(
-                SweepBox {
-                    position: player_box.position,
-                    size: player_box.size,
-                    velocity: camera_velocity,
-                },
-                block_box,
-            ) {
-                self.camera.position = initial.camera.position + camera_velocity * time;
+            self.camera.position = initial.camera.position + player_velocity * time;
 
-                // Sliding
-                let remaining_time = 1.0 - time;
-                let remaining_velocity = camera_velocity * remaining_time;
-                let projected_velocity =
-                    remaining_velocity - remaining_velocity.dot(normal) * normal;
-                self.camera.position += projected_velocity;
+            // Sliding
+            let remaining_time = 1.0 - time;
+            let remaining_velocity = player_velocity * remaining_time;
+            let projected_velocity = remaining_velocity - remaining_velocity.dot(normal) * normal;
+            self.camera.position += projected_velocity;
 
-                if normal.y > 0.0 {
-                    self.on_ground = true;
-                }
+            if normal.y > 0.0 {
+                self.on_ground = true;
             }
         }
     }
@@ -283,6 +312,7 @@ impl AABB {
 }
 
 // https://www.gamedev.net/tutorials/programming/general-and-gameplay-programming/swept-aabb-collision-detection-and-response-r3084/
+// https://www.gamedev.net/tutorials/_/technical/game-programming/swept-aabb-collision-detection-and-response-r3084/
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SweepBox {
     pub position: Vec3<f32>,
@@ -325,12 +355,23 @@ pub fn sweep_test(a: SweepBox, b: AABB) -> Option<SweepTestResult> {
     let (y_abs_enter, y_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 1);
     let (z_abs_enter, z_abs_exit) = calc_axis_abs_aabb(a, b, a.velocity, 2);
 
+    // dbg!((x_abs_enter, y_abs_enter, z_abs_enter));
+    // dbg!((x_abs_exit, y_abs_exit, z_abs_exit));
+
     let (x_enter, x_exit) = calc_axis_rel(x_abs_enter, x_abs_exit, a.velocity.x);
     let (y_enter, y_exit) = calc_axis_rel(y_abs_enter, y_abs_exit, a.velocity.y);
     let (z_enter, z_exit) = calc_axis_rel(z_abs_enter, z_abs_exit, a.velocity.z);
 
+    // dbg!((x_enter, y_enter, z_enter));
+
     let entry_time = x_enter.max(y_enter).max(z_enter);
     let exit_time = x_exit.min(y_exit).min(z_exit);
+
+    // dbg!((entry_time, exit_time));
+
+    // if !x_enter.is_between01() || !y_enter.is_between01() || !z_enter.is_between01() {
+    //     return None;
+    // }
 
     if entry_time > exit_time
         || (x_enter < 0.0 && y_enter < 0.0 && z_enter < 0.0)
@@ -388,6 +429,21 @@ pub fn sweep_test(a: SweepBox, b: AABB) -> Option<SweepTestResult> {
 
 #[test]
 pub fn test_sweep_test() {
+    assert_eq!(
+        sweep_test(
+            SweepBox {
+                position: Vec3::new(8.4, 16.02, 8.4),
+                size: Vec3::new(0.2, 2.0, 0.2),
+                velocity: Vec3::new(0.0, -0.0625, 0.0),
+            },
+            AABB {
+                position: Vec3::new(7.0, 15.0, 8.0),
+                size: Vec3::one(),
+            }
+        ),
+        None
+    );
+
     assert_eq!(
         sweep_test(
             SweepBox {
@@ -521,7 +577,7 @@ pub fn test_sweep_test() {
         })
     );
     assert_eq!(
-        dbg!(sweep_test(
+        sweep_test(
             SweepBox {
                 position: Vec3::new(0.5, 1.1, 0.5),
                 size: Vec3::one(),
@@ -531,7 +587,7 @@ pub fn test_sweep_test() {
                 position: Vec3::zero(),
                 size: Vec3::one()
             }
-        )),
+        ),
         Some(SweepTestResult {
             normal: Vec3 {
                 x: 0.0,
