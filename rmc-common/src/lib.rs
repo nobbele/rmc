@@ -15,6 +15,7 @@ pub use camera::Camera;
 pub mod game;
 pub use game::Game;
 pub mod input;
+pub mod physics;
 
 pub trait Blend {
     fn blend(&self, other: &Self, alpha: f32) -> Self;
