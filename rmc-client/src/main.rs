@@ -62,7 +62,7 @@ fn main() {
                 .unwrap();
 
         gl.enable(glow::DEPTH_TEST);
-        gl.enable(glow::CULL_FACE);
+        // gl.enable(glow::CULL_FACE);
         gl.clear_color(0.1, 0.2, 0.3, 1.0);
 
         let crosshair_texture = load_texture(

@@ -19,6 +19,17 @@ impl InputState {
         self.mouse_buttons.get(&button).cloned().unwrap_or_default()
     }
 
+    pub fn get_movement_vector(&self) -> Vec2<f32> {
+        let fwd_bck =
+            self.get_key(Keycode::W).pressed() as i8 - self.get_key(Keycode::S).pressed() as i8;
+        let rgh_lft =
+            self.get_key(Keycode::D).pressed() as i8 - self.get_key(Keycode::A).pressed() as i8;
+
+        Vec2::new(rgh_lft as f32, fwd_bck as f32)
+    }
+}
+
+impl InputState {
     pub fn update_held_status(&mut self) {
         for keycode in self.keys.keys().cloned().collect::<Vec<_>>() {
             self.keys.insert(

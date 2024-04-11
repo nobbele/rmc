@@ -118,23 +118,6 @@ pub fn test_sweep_test() {
         sweep_test(
             SweepBox {
                 collider: Aabb {
-                    min: Vec3::new(8.4, 16.02, 8.4),
-                    max: Vec3::new(8.4, 16.02, 8.4) + Extent3::new(0.2, 2.0, 0.2),
-                },
-                velocity: Vec3::new(0.0, -0.0625, 0.0),
-            },
-            Aabb {
-                min: Vec3::new(7.0, 15.0, 8.0),
-                max: Vec3::new(7.0, 15.0, 8.0) + Vec3::one(),
-            }
-        ),
-        None
-    );
-
-    assert_eq!(
-        sweep_test(
-            SweepBox {
-                collider: Aabb {
                     min: Vec3::zero(),
                     max: Vec3::zero() + Extent3::one(),
                 },

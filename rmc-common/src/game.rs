@@ -28,7 +28,7 @@ const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 
 #[derive(Clone)]
 pub struct Game {
-    pub blocks: Rc<Array3<Option<Block>>>,
+    pub blocks: Rc<Array3<Block>>,
 
     pub camera: Camera,
     pub velocity: Vec3<f32>,
@@ -40,17 +40,17 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let mut blocks: Array3<Option<Block>> = Array3::default((16, 16, 16));
+        let mut blocks: Array3<Block> = Array3::default((16, 16, 16));
         for y in 0..16 {
             for z in 0..16 {
                 for x in 0..16 {
-                    blocks[(x, y, z)] = Some(Block { id: 1 });
+                    blocks[(x, y, z)] = Block::GRASS;
                 }
             }
         }
 
-        // blocks[(7, 15, 8)] = Some(Block { id: 1 });
-        // blocks[(8, 15, 8)] = Some(Block { id: 1 });
+        // blocks[(7, 15, 8)] = Block::GRASS;
+        // blocks[(8, 15, 8)] = Block::GRASS;
 
         Game {
             blocks: Rc::new(blocks),
@@ -95,15 +95,15 @@ impl Game {
     }
 
     fn handle_movement(&mut self, input: &InputState) {
-        let fwd_bck =
-            input.get_key(Keycode::W).pressed() as i8 - input.get_key(Keycode::S).pressed() as i8;
-        let rgh_lft =
-            input.get_key(Keycode::D).pressed() as i8 - input.get_key(Keycode::A).pressed() as i8;
         let up_down = input.get_key(Keycode::Space).pressed() as i8
             - input.get_key(Keycode::LShift).pressed() as i8;
-        self.camera
-            .move_forward(fwd_bck as f32 * SPEED * TICK_DELTA);
-        self.camera.move_right(rgh_lft as f32 * SPEED * TICK_DELTA);
+        let movement_vector = input.get_movement_vector();
+        self.camera.position += (movement_vector.x * self.camera.right()
+            + movement_vector.y * self.camera.forward())
+        .try_normalized()
+        .unwrap_or_default()
+            * SPEED
+            * TICK_DELTA;
 
         if self.on_ground {
             self.velocity.y = up_down as f32 * *JUMP_STRENGTH;
@@ -152,6 +152,7 @@ impl Game {
             for (idx, _block) in self
                 .blocks
                 .indexed_iter()
+                .map(|(idx, block)| (idx, if block.id == 0 { None } else { Some(block) }))
                 .filter_map(|(idx, block)| block.map(|b| (idx, b)))
                 // WTF How does this improve the collision detection???
                 .collect::<Vec<_>>()
@@ -191,14 +192,14 @@ impl Game {
         }
     }
 
-    fn modify_chunk(&mut self, f: impl FnOnce(&mut Array3<Option<Block>>) -> bool) {
+    fn modify_chunk(&mut self, f: impl FnOnce(&mut Array3<Block>) -> bool) {
         let mut blocks = Rc::<_>::unwrap_or_clone(self.blocks.clone());
         if f(&mut blocks) {
             self.blocks = Rc::new(blocks);
         }
     }
 
-    pub fn set_block(&mut self, position: Vec3<i32>, block: Option<Block>) {
+    pub fn set_block(&mut self, position: Vec3<i32>, block: Block) {
         self.modify_chunk(|chunk| {
             if let Some(entry) = chunk.get_mut(position.map(|e| e as _).into_tuple()) {
                 *entry = block;
@@ -217,19 +218,18 @@ impl Game {
         self.blocks
             .get(position.map(|e| e as usize).into_tuple())
             .cloned()
-            .flatten()
     }
 
     fn handle_place_destroy(&mut self, input: &InputState) {
         if let Some(highlighted) = self.look_at_raycast {
             if input.get_mouse_button(MouseButton::Left).just_pressed() {
-                self.set_block(highlighted.position, None);
+                self.set_block(highlighted.position, Block::AIR);
             }
 
             if input.get_mouse_button(MouseButton::Right).just_pressed() {
                 let position = highlighted.position + highlighted.normal.numcast().unwrap();
 
-                self.set_block(position, Some(Block { id: 0 }));
+                self.set_block(position, Block::TEST);
             }
         }
     }

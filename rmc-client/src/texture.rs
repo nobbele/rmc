@@ -34,6 +34,16 @@ pub unsafe fn load_texture(gl: &glow::Context, data_source: DataSource<'_, [u8]>
         glow::TEXTURE_MIN_FILTER,
         glow::NEAREST as _,
     );
+    gl.tex_parameter_i32(
+        glow::TEXTURE_2D,
+        glow::TEXTURE_WRAP_S,
+        glow::CLAMP_TO_EDGE as _,
+    );
+    gl.tex_parameter_i32(
+        glow::TEXTURE_2D,
+        glow::TEXTURE_WRAP_T,
+        glow::CLAMP_TO_EDGE as _,
+    );
     texture
 }
 
@@ -93,6 +103,16 @@ pub unsafe fn load_array_texture(
         glow::TEXTURE_2D_ARRAY,
         glow::TEXTURE_MIN_FILTER,
         glow::NEAREST as _,
+    );
+    gl.tex_parameter_i32(
+        glow::TEXTURE_2D_ARRAY,
+        glow::TEXTURE_WRAP_S,
+        glow::CLAMP_TO_EDGE as _,
+    );
+    gl.tex_parameter_i32(
+        glow::TEXTURE_2D_ARRAY,
+        glow::TEXTURE_WRAP_T,
+        glow::CLAMP_TO_EDGE as _,
     );
     block_array_texture
 }

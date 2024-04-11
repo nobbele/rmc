@@ -5,9 +5,16 @@ use vek::Vec3;
 
 use crate::DiscreteBlend;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
 pub struct Block {
     pub id: u8,
+    pub light: u8,
+}
+
+impl Block {
+    pub const AIR: Block = Block { id: 0, light: 7 };
+    pub const TEST: Block = Block { id: 1, light: 7 };
+    pub const GRASS: Block = Block { id: 2, light: 7 };
 }
 
 impl DiscreteBlend for Block {}
@@ -102,12 +109,12 @@ pub fn raycast(
     pos: Vec3<f32>,
     dir: Vec3<f32>,
     radius: f32,
-    blocks: ArrayView3<Option<Block>>,
+    blocks: ArrayView3<Block>,
 ) -> Option<RaycastOutput> {
     raycast_generalized(pos, dir, radius, 1.0, |grid_pos| {
         matches!(
             blocks.get(grid_pos.map(|e| e as _).into_tuple()),
-            Some(Some(_))
+            Some(Block { id: 1.., .. })
         )
     })
 }
@@ -175,10 +182,10 @@ mod tests {
 
     #[test]
     fn test_raycast2() {
-        let mut blocks: ndarray::Array3<Option<Block>> = ndarray::Array3::default((16, 16, 16));
-        blocks[(9, 8, 0)] = Some(Block { id: 0 });
-        blocks[(9, 9, 0)] = Some(Block { id: 0 });
-        blocks[(9, 10, 0)] = Some(Block { id: 0 });
+        let mut blocks: ndarray::Array3<Block> = ndarray::Array3::default((16, 16, 16));
+        blocks[(9, 8, 0)] = Block::TEST;
+        blocks[(9, 9, 0)] = Block::TEST;
+        blocks[(9, 10, 0)] = Block::TEST;
 
         assert_eq!(
             raycast(
@@ -245,11 +252,11 @@ mod tests {
 
     #[test]
     fn test_raycast() {
-        let mut blocks: Array3<Option<Block>> = Array3::default((16, 16, 16));
+        let mut blocks: Array3<Block> = Array3::default((16, 16, 16));
         for y in 0..16 {
             for z in 0..16 {
                 for x in 0..16 {
-                    blocks[(x, y, z)] = Some(Block { id: 1 });
+                    blocks[(x, y, z)] = Block::TEST;
                 }
             }
         }
