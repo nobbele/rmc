@@ -209,7 +209,8 @@ fn main() {
                         game.curr.look_at_raycast.map(|r| r.position),
                         game.curr
                             .look_at_raycast
-                            .map(|r| game.curr.get_block(r.position)),
+                            .map(|r| game.curr.get_block(r.position))
+                            .flatten(),
                     ));
                     ui.text(format!(
                         "Orientation: {:.2} {:.2} ({:.2})",

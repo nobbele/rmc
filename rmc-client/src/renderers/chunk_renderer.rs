@@ -303,8 +303,15 @@ impl ChunkRenderer {
                     .map(|(pos, block)| Instance {
                         position: pos.as_(),
                         texture: block.id - 1,
-                        light: [0, 1, 2, 3, 4, 5]
-                            .map(|face| get_block_light(blocks, pos + face_to_normal(face))),
+                        light: {
+                            let mut light = [0, 1, 2, 3, 4, 5]
+                                .map(|face| get_block_light(blocks, pos + face_to_normal(face)));
+                            if block.open_to_sky {
+                                light[1] = 15;
+                            }
+
+                            light
+                        },
                     })
                     .collect::<Vec<_>>()
                     .as_slice(),
