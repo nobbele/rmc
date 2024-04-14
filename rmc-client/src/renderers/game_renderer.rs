@@ -1,5 +1,9 @@
 use glow::HasContext;
-use rmc_common::Game;
+use ndarray::Array3;
+use rmc_common::{
+    world::{Chunk, CHUNK_SIZE},
+    Game,
+};
 use vek::{Mat3, Mat4, Vec2, Vec3};
 
 use crate::{
@@ -12,7 +16,7 @@ use super::ChunkRenderer;
 pub struct GameRenderer {
     pub projection: Mat4<f32>,
 
-    pub chunk_renderer: ChunkRenderer,
+    pub chunk_renderers: Array3<ChunkRenderer>,
 
     block_array_texture: glow::Texture,
     screen_program: glow::Program,
@@ -26,7 +30,9 @@ impl GameRenderer {
             &[
                 DataSource::Inline(include_bytes!("../../textures/test.png")),
                 DataSource::Inline(include_bytes!("../../textures/grass.png")),
-                DataSource::Inline(include_bytes!("../../textures/test.png")),
+                DataSource::Inline(include_bytes!("../../textures/lantern.png")),
+                DataSource::Inline(include_bytes!("../../textures/mesh.png")),
+                DataSource::Inline(include_bytes!("../../textures/wood.png")),
             ],
         );
 
@@ -45,12 +51,26 @@ impl GameRenderer {
         GameRenderer {
             projection: Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.0001),
 
-            chunk_renderer: ChunkRenderer::new(gl),
+            chunk_renderers: Array3::from_shape_fn((3, 3, 3), |_| ChunkRenderer::new(gl)),
 
             block_array_texture,
             screen_program,
             program,
         }
+    }
+
+    pub unsafe fn update_chunk(
+        &mut self,
+        gl: &glow::Context,
+        idx: (usize, usize, usize),
+        chunk_coord: Vec3<i32>,
+        chunk: &Chunk,
+    ) {
+        self.chunk_renderers[idx].update_blocks(
+            gl,
+            chunk_coord.as_() * CHUNK_SIZE as f32,
+            chunk.blocks.view(),
+        )
     }
 
     pub unsafe fn draw(&self, gl: &glow::Context, game: &Game) {
@@ -80,7 +100,9 @@ impl GameRenderer {
         );
 
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(self.block_array_texture));
-        self.chunk_renderer.draw(&gl);
+        for chunk_renderer in &self.chunk_renderers {
+            chunk_renderer.draw(&gl);
+        }
 
         let size = Vec2::new(48.0, 48.0);
         let screen_mat = Mat3::<f32>::scaling_3d((size / Vec2::new(1024.0, 768.0)).with_z(1.0))

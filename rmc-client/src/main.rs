@@ -3,7 +3,8 @@ use renderers::ScreenQuadRenderer;
 use rmc_common::{
     game::{TICK_DELTA, TICK_SPEED},
     input::{ButtonBuffer, ButtonStateEvent, InputState, KeyboardEvent, MouseButtonEvent},
-    lerp, Blend, Game, LookBack,
+    world::CHUNK_SIZE,
+    Blend, Game, LookBack,
 };
 use sdl2::{event::Event, keyboard::Keycode};
 use std::{collections::HashMap, process::exit, time::Instant};
@@ -37,6 +38,8 @@ fn main() {
             glow::Context::from_loader_function(|s| video.gl_get_proc_address(s) as *const _);
         let mut event_pump = sdl.event_pump().unwrap();
 
+        // sdl.video().unwrap().gl_set_swap_interval(0).unwrap();
+
         gl.enable(glow::DEBUG_OUTPUT);
         gl.enable(glow::DEBUG_OUTPUT_SYNCHRONOUS);
         gl.debug_message_callback(|_ty, _id, _severity, _length, message| println!("{}", message));
@@ -62,7 +65,7 @@ fn main() {
                 .unwrap();
 
         gl.enable(glow::DEPTH_TEST);
-        // gl.enable(glow::CULL_FACE);
+        gl.enable(glow::CULL_FACE);
         gl.clear_color(0.1, 0.2, 0.3, 1.0);
 
         let crosshair_texture = load_texture(
@@ -80,16 +83,24 @@ fn main() {
         };
 
         let mut game_renderer = GameRenderer::new(&gl);
-        game_renderer
-            .chunk_renderer
-            .update_blocks(&gl, game.curr.blocks.view());
+        for (pos, chunk) in game.curr.world.chunks_iter() {
+            game_renderer.update_chunk(
+                &gl,
+                game.curr
+                    .world
+                    .chunk_index(pos * CHUNK_SIZE as i32)
+                    .unwrap()
+                    .into_tuple(),
+                pos,
+                &chunk,
+            );
+        }
 
         let mut sdl_time = LookBack::new_identical(sdl.timer().unwrap().performance_counter());
 
         let mut keyboard_buffer = ButtonBuffer::new();
         let mut mouse_button_buffer = ButtonBuffer::new();
 
-        let mut fps = 0.0;
         let mut running = true;
         let mut accumulator = 0.0;
         while running {
@@ -98,7 +109,7 @@ fn main() {
                 / sdl.timer().unwrap().performance_frequency() as f32;
             accumulator += dt * TICK_SPEED;
 
-            fps = lerp(fps, 1.0 / dt, 0.1);
+            let fps = 1.0 / dt;
 
             for event in event_pump.poll_iter() {
                 imgui_platform.handle_event(&mut imgui, &event);
@@ -191,16 +202,39 @@ fn main() {
 
                 input_state.mouse_delta = Vec2::zero();
 
-                if game.prev.blocks != game.curr.blocks {
-                    game_renderer
-                        .chunk_renderer
-                        .update_blocks(&gl, game.curr.blocks.view());
+                for (pos, chunk) in game.curr.world.chunks_iter() {
+                    if game
+                        .prev
+                        .world
+                        .chunk_at(pos * CHUNK_SIZE as i32)
+                        .unwrap()
+                        .blocks
+                        .view()
+                        != game
+                            .curr
+                            .world
+                            .chunk_at(pos * CHUNK_SIZE as i32)
+                            .unwrap()
+                            .blocks
+                            .view()
+                    {
+                        game_renderer.update_chunk(
+                            &gl,
+                            game.curr
+                                .world
+                                .chunk_index(pos * CHUNK_SIZE as i32)
+                                .unwrap()
+                                .into_tuple(),
+                            pos,
+                            &chunk,
+                        );
+                    }
                 }
 
                 accumulator -= TICK_DELTA;
 
                 let end_of_tick = Instant::now();
-                if end_of_tick.duration_since(start_of_tick).as_secs_f32() > 0.1 {
+                if end_of_tick.duration_since(start_of_tick).as_secs_f32() > 1.0 {
                     println!("Game is running too slow!");
                     exit(-1);
                 }
@@ -211,7 +245,11 @@ fn main() {
                 .always_auto_resize(true)
                 .build(|| {
                     ui.text(format!("FPS: {:.0} ({:.0}ms)", fps, (1.0 / fps) * 1000.0));
-                    ui.text(format!("Updates: {:.0}", game.curr.block_update_count));
+                    ui.text(format!(
+                        "Updates: {} / {}",
+                        game.curr.block_update_count,
+                        game.curr.dirty_blocks.len()
+                    ));
                     ui.text(format!("Position: {:.2}", game.curr.camera.position));
                     ui.text(format!(
                         "Highlight: {:?} ({:?}) (light: {})",
@@ -221,12 +259,12 @@ fn main() {
                             .unwrap_or_default(),
                         game.curr
                             .look_at_raycast
-                            .map(|r| game.curr.get_block(r.position))
+                            .map(|r| game.curr.world.get_block(r.position))
                             .flatten()
                             .unwrap_or_default(),
                         game.curr
                             .look_at_raycast
-                            .map(|r| game.curr.get_block(r.position + r.normal.as_()))
+                            .map(|r| game.curr.world.get_block(r.position + r.normal.as_()))
                             .flatten()
                             .map(|b| b.light)
                             .unwrap_or_default(),
@@ -243,7 +281,6 @@ fn main() {
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
             game_renderer.draw(&gl, &game.prev.blend(&game.curr, accumulator / TICK_DELTA));
-            // game_renderer.draw(&gl, &game.curr);
             screen_quad_renderer.draw(&gl, crosshair_texture);
             imgui_renderer
                 .render(&gl, &imgui_textures, imgui.render())

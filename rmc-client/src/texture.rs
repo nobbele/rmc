@@ -58,7 +58,7 @@ pub unsafe fn load_array_texture(
                 DataSource::Inline(bytes) => image::load_from_memory(bytes).unwrap(),
                 DataSource::Path(_) => panic!(),
             }
-            .to_rgb8()
+            .to_rgba8()
         })
         .collect::<Vec<_>>();
 
@@ -73,7 +73,7 @@ pub unsafe fn load_array_texture(
     gl.tex_storage_3d(
         glow::TEXTURE_2D_ARRAY,
         1,
-        glow::RGB8,
+        glow::RGBA8,
         images[0].width() as _,
         images[0].height() as _,
         images.len() as _,
@@ -88,7 +88,7 @@ pub unsafe fn load_array_texture(
             image.width() as _,
             image.height() as _,
             1,
-            glow::RGB,
+            glow::RGBA,
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(image.into_iter().as_slice()),
         );

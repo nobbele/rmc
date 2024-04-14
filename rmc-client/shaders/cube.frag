@@ -12,10 +12,13 @@ uniform sampler2DArray uniform_Texture;
 
 void main() {
     float z = float(vert_Texture);
-    vec3 texel = vec3(texture(uniform_Texture, vec3(vert_Uv, z)));
+    vec4 texel = vec4(texture(uniform_Texture, vec3(vert_Uv, z)));
     vec3 highlightColor = vert_Highlighted > 0.5 ? vec3(0.5, 0.5, 0.5) : vec3(0.0, 0.0, 0.0);
 
-    // frag_Color = vec4(texel + highlightColor, 1.0);
+    if (texel.w == 0) {
+        discard;
+    }
+
     float lightStrength = float(vert_Light) / 255.0;
-    frag_Color = vec4(lightStrength * texel + highlightColor, 1.0);
+    frag_Color = vec4(clamp(0, lightStrength, 1) * vec3(texel) + highlightColor, 1.0);
 }

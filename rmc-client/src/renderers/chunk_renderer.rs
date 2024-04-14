@@ -277,29 +277,33 @@ impl ChunkRenderer {
         }
     }
 
-    pub unsafe fn update_blocks(&mut self, gl: &glow::Context, blocks: ArrayView3<Block>) {
+    pub unsafe fn update_blocks(
+        &mut self,
+        gl: &glow::Context,
+        offset: Vec3<f32>,
+        blocks: ArrayView3<Block>,
+    ) {
+        let instances = blocks
+            .indexed_iter()
+            .map(|(idx, block)| (idx, if block.id == 0 { None } else { Some(block) }))
+            .filter_map(|(pos, block)| {
+                block.map(|b| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), b))
+            })
+            .map(|(pos, block)| Instance {
+                position: offset + pos.as_(),
+                texture: block.id - 1,
+                light: [0, 1, 2, 3, 4, 5]
+                    .map(|face| get_block_light(blocks, pos + face_to_normal(face))),
+            })
+            .collect::<Vec<_>>();
+
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ib));
         gl.buffer_data_u8_slice(
             glow::ARRAY_BUFFER,
-            bytemuck::cast_slice::<_, u8>(
-                blocks
-                    .indexed_iter()
-                    .map(|(idx, block)| (idx, if block.id == 0 { None } else { Some(block) }))
-                    .filter_map(|(pos, block)| {
-                        block.map(|b| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), b))
-                    })
-                    .map(|(pos, block)| Instance {
-                        position: pos.as_(),
-                        texture: block.id - 1,
-                        light: [0, 1, 2, 3, 4, 5]
-                            .map(|face| get_block_light(blocks, pos + face_to_normal(face))),
-                    })
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ),
+            bytemuck::cast_slice::<_, u8>(instances.as_slice()),
             glow::STATIC_DRAW,
         );
-        self.ib_size = blocks.len();
+        self.ib_size = instances.len();
     }
 
     pub unsafe fn draw(&self, gl: &glow::Context) {

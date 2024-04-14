@@ -2,17 +2,13 @@ use crate::{
     camera::Angle,
     input::InputState,
     physics::{sweep_test, SweepBox, SweepTestResult},
-    world::{face_to_normal, raycast, Block, RaycastOutput},
+    world::{face_to_normal, raycast, Block, RaycastOutput, World, CHUNK_SIZE},
     Blend, Camera,
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
-use ndarray::Array3;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
-use std::{
-    collections::{HashMap, VecDeque},
-    rc::Rc,
-};
+use std::collections::{HashMap, VecDeque};
 use vek::{Aabb, Extent3, Vec3};
 
 pub const TICK_RATE: u32 = 16;
@@ -30,9 +26,9 @@ const SPEED: f32 = 4.0;
 const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 2.0, 0.2);
 const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Game {
-    pub blocks: Rc<Array3<Block>>,
+    pub world: World,
 
     pub camera: Camera,
     pub velocity: Vec3<f32>,
@@ -47,36 +43,27 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Self {
-        let mut blocks: Array3<Block> = Array3::default((16, 16, 16));
-        for y in 8..12 {
-            for z in 2..14 {
-                for x in 2..14 {
-                    blocks[(x, y, z)] = Block::GRASS;
+        let mut world = World::new(Vec3::zero());
+        for (chunk_x, chunk_z) in (-1_i32..=1).cartesian_product(-1_i32..=1) {
+            for y in 0..14 {
+                for z in 0..16 {
+                    for x in 0..16 {
+                        world.set_block(
+                            Vec3::new(
+                                chunk_x * CHUNK_SIZE as i32 + x,
+                                y,
+                                chunk_z * CHUNK_SIZE as i32 + z,
+                            )
+                            .as_(),
+                            Block::GRASS,
+                        );
+                    }
                 }
             }
         }
 
-        blocks[(6, 11, 7)] = Block::AIR;
-        blocks[(6, 11, 9)] = Block::AIR;
-        blocks[(7, 11, 8)] = Block::AIR;
-        blocks[(5, 11, 8)] = Block::AIR;
-        blocks[(7, 11, 7)] = Block::AIR;
-        blocks[(7, 11, 9)] = Block::AIR;
-        blocks[(5, 11, 7)] = Block::AIR;
-        blocks[(5, 11, 9)] = Block::AIR;
-
-        blocks[(6, 10, 8)] = Block::AIR;
-        blocks[(6, 10, 7)] = Block::AIR;
-        blocks[(6, 10, 9)] = Block::AIR;
-        blocks[(7, 10, 8)] = Block::AIR;
-        blocks[(5, 10, 8)] = Block::AIR;
-        blocks[(7, 10, 7)] = Block::AIR;
-        blocks[(7, 10, 9)] = Block::AIR;
-        blocks[(5, 10, 7)] = Block::AIR;
-        blocks[(5, 10, 9)] = Block::AIR;
-
         let mut game = Game {
-            blocks: Rc::new(blocks),
+            world,
 
             camera: Camera {
                 position: Vec3::new(8.5, 18.0, 8.5),
@@ -92,7 +79,7 @@ impl Game {
             block_update_count: 0,
         };
 
-        game.set_block(Vec3::new(6, 11, 8), Block::LANTERN);
+        game.set_block(Vec3::new(6, 14, 8), Block::LANTERN);
 
         game
     }
@@ -108,15 +95,11 @@ impl Game {
 
         self.handle_collision(&initial);
 
-        self.look_at_raycast = raycast(
-            self.camera.position,
-            self.camera.look_at(),
-            7.5,
-            self.blocks.view(),
-        );
+        self.look_at_raycast = raycast(self.camera.position, self.camera.look_at(), 7.5, |pos| {
+            self.world.get_block(pos)
+        });
 
         self.handle_place_destroy(input);
-        // self.update_lighting();
         self.update_blocks();
     }
 
@@ -179,19 +162,33 @@ impl Game {
 
             let mut collisions = Vec::new();
 
-            for (idx, _block) in self
-                .blocks
-                .indexed_iter()
-                .map(|(idx, block)| (idx, if block.id == 0 { None } else { Some(block) }))
-                .filter_map(|(idx, block)| block.map(|b| (idx, b)))
+            // TODO broad phase over chunks.
+            for (pos, _block) in self
+                .world
+                .chunks_iter()
+                .flat_map(|(chunk_coord, chunk)| {
+                    chunk
+                        .blocks
+                        .indexed_iter()
+                        .map(|(offset, block)| {
+                            (
+                                chunk_coord * CHUNK_SIZE as i32 + Vec3::<usize>::from(offset).as_(),
+                                *block,
+                            )
+                        })
+                        .collect_vec()
+                        .into_iter()
+                })
+                .map(|(pos, block)| (pos, if block.id == 0 { None } else { Some(block) }))
+                .filter_map(|(pos, block)| block.map(|b| (pos, b)))
                 // WTF How does this improve the collision detection???
                 .collect_vec()
                 .into_iter()
                 .rev()
             {
                 let block_box = Aabb {
-                    min: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32),
-                    max: Vec3::new(idx.0 as f32, idx.1 as f32, idx.2 as f32) + Vec3::one(),
+                    min: pos.as_(),
+                    max: pos.as_() + Vec3::one(),
                 };
 
                 if broad_box.collides_with_aabb(block_box) {
@@ -223,7 +220,7 @@ impl Game {
     }
 
     fn update_blocks(&mut self) {
-        const MAX_UPDATES_COUNT: usize = 8192;
+        const MAX_UPDATES_COUNT: usize = 4096;
 
         self.block_update_count = 0;
 
@@ -233,15 +230,9 @@ impl Game {
 
             let dirty_blocks = self.dirty_blocks.drain(..update_count).collect_vec();
 
-            // println!(
-            //     "----------- ({:03} / {:03}) -----------",
-            //     dirty_blocks.len(),
-            //     dirty_blocks.len() + self.dirty_blocks.len()
-            // );
-
             let mut replaces = HashMap::new();
             for position in dirty_blocks {
-                let Some(block) = self.get_block(position) else {
+                let Some(block) = self.world.get_block(position) else {
                     continue;
                 };
 
@@ -270,17 +261,17 @@ impl Game {
                             .into_iter()
                             .map(|o| position + o),
                         )
-                        .map(|position| (position, self.get_block(position)))
+                        .map(|position| (position, self.world.get_block(position)))
                         .collect_vec()
                 } else {
                     neighbor_positions
-                        .map(|position| (position, self.get_block(position)))
+                        .map(|position| (position, self.world.get_block(position)))
                         .to_vec()
                 };
 
                 let light = match () {
                     _ if block.id == Block::LANTERN.id => 255,
-                    _ if block.id == Block::AIR.id => neighbors
+                    _ if block.id == Block::AIR.id || block.id == Block::MESH.id => neighbors
                         .iter()
                         .map(|&(p, b)| {
                             b.map(|b| {
@@ -304,37 +295,11 @@ impl Game {
                     replaces.insert(position, new_block);
                 }
             }
-            self.replace_blocks1(replaces.into_iter(), false);
-        }
-    }
 
-    pub fn replace_blocks(&mut self, replaces: impl Iterator<Item = (Vec3<i32>, Block)>) {
-        self.replace_blocks1(replaces, true);
-    }
-
-    pub fn replace_blocks1(
-        &mut self,
-        replaces: impl Iterator<Item = (Vec3<i32>, Block)>,
-        update: bool,
-    ) {
-        if replaces.size_hint().1 == Some(0) {
-            return;
-        }
-
-        let mut blocks = Rc::unwrap_or_clone(Rc::clone(&self.blocks));
-        for (position, block) in replaces {
-            if position.into_iter().all(|e| e >= 0) {
-                if let Some(target) = blocks.get_mut(position.map(|e| e as _).into_tuple()) {
-                    if *target != block {
-                        if update {
-                            self.dirty_blocks.push_back(position);
-                        }
-                        *target = block;
-                    }
-                }
+            for (position, block) in replaces {
+                self.set_block1(position, block, false);
             }
         }
-        self.blocks = Rc::new(blocks);
     }
 
     pub fn set_block(&mut self, position: Vec3<i32>, block: Block) {
@@ -342,18 +307,10 @@ impl Game {
     }
 
     pub fn set_block1(&mut self, position: Vec3<i32>, block: Block, update: bool) {
-        self.replace_blocks1([(position, block)].into_iter(), update);
-    }
-
-    pub fn get_block(&self, position: Vec3<i32>) -> Option<Block> {
-        // TODO chunks
-        if !position.iter().all(|e| *e >= 0) {
-            return None;
+        self.world.set_block(position, block);
+        if update {
+            self.dirty_blocks.push_back(position);
         }
-
-        self.blocks
-            .get(position.map(|e| e as usize).into_tuple())
-            .cloned()
     }
 
     fn handle_place_destroy(&mut self, input: &InputState) {
@@ -365,7 +322,13 @@ impl Game {
             if input.get_mouse_button(MouseButton::Right).just_pressed() {
                 let position = highlighted.position + highlighted.normal.numcast().unwrap();
 
-                self.set_block(position, Block::TEST);
+                self.set_block(position, Block::WOOD);
+            }
+
+            if input.get_mouse_button(MouseButton::Middle).just_pressed() {
+                let position = highlighted.position + highlighted.normal.numcast().unwrap();
+
+                self.set_block(position, Block::LANTERN);
             }
         }
     }
@@ -374,7 +337,7 @@ impl Game {
 impl Blend for Game {
     fn blend(&self, other: &Game, alpha: f32) -> Self {
         Self {
-            blocks: self.blocks.blend(&other.blocks, alpha),
+            world: self.world.blend(&other.world, alpha),
 
             camera: self.camera.blend(&other.camera, alpha),
             velocity: self.velocity.blend(&other.velocity, alpha),
