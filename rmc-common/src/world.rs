@@ -12,9 +12,10 @@ pub struct Block {
 }
 
 impl Block {
-    pub const AIR: Block = Block { id: 0, light: 7 };
+    pub const AIR: Block = Block { id: 0, light: 1 };
     pub const TEST: Block = Block { id: 1, light: 7 };
     pub const GRASS: Block = Block { id: 2, light: 7 };
+    pub const LANTERN: Block = Block { id: 3, light: 7 };
 }
 
 impl DiscreteBlend for Block {}

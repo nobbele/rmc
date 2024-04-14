@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 use ndarray::Array3;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
 use std::rc::Rc;
-use vek::{Aabb, Extent3, Vec3};
+use vek::{num_integer::Roots, Aabb, Extent3, Vec3};
 
 pub const TICK_RATE: u32 = 16;
 pub const TICK_SPEED: f32 = 1.0;
@@ -41,16 +41,33 @@ pub struct Game {
 impl Game {
     pub fn new() -> Self {
         let mut blocks: Array3<Block> = Array3::default((16, 16, 16));
-        for y in 0..16 {
-            for z in 0..16 {
-                for x in 0..16 {
+        for y in 8..12 {
+            for z in 2..14 {
+                for x in 2..14 {
                     blocks[(x, y, z)] = Block::GRASS;
                 }
             }
         }
 
-        // blocks[(7, 15, 8)] = Block::GRASS;
-        // blocks[(8, 15, 8)] = Block::GRASS;
+        blocks[(6, 11, 8)] = Block::LANTERN;
+        blocks[(6, 11, 7)] = Block::AIR;
+        blocks[(6, 11, 9)] = Block::AIR;
+        blocks[(7, 11, 8)] = Block::AIR;
+        blocks[(5, 11, 8)] = Block::AIR;
+        blocks[(7, 11, 7)] = Block::AIR;
+        blocks[(7, 11, 9)] = Block::AIR;
+        blocks[(5, 11, 7)] = Block::AIR;
+        blocks[(5, 11, 9)] = Block::AIR;
+
+        blocks[(6, 10, 8)] = Block::AIR;
+        blocks[(6, 10, 7)] = Block::AIR;
+        blocks[(6, 10, 9)] = Block::AIR;
+        blocks[(7, 10, 8)] = Block::AIR;
+        blocks[(5, 10, 8)] = Block::AIR;
+        blocks[(7, 10, 7)] = Block::AIR;
+        blocks[(7, 10, 9)] = Block::AIR;
+        blocks[(5, 10, 7)] = Block::AIR;
+        blocks[(5, 10, 9)] = Block::AIR;
 
         Game {
             blocks: Rc::new(blocks),
@@ -87,6 +104,7 @@ impl Game {
         );
 
         self.handle_place_destroy(input);
+        self.update_lighting();
     }
 
     fn handle_camera_movement(&mut self, input: &InputState) {
@@ -110,7 +128,6 @@ impl Game {
         }
     }
 
-    // TODO use vek::Aabb
     fn handle_collision(&mut self, initial: &Game) {
         self.on_ground = false;
 
@@ -192,8 +209,103 @@ impl Game {
         }
     }
 
+    fn update_lighting(&mut self) {
+        fn cast_(utup: (usize, usize, usize)) -> Vec3<i32> {
+            Vec3::new(utup.0 as i32, utup.1 as i32, utup.2 as i32)
+        }
+
+        // Light sources
+        {
+            let light_sources = self
+                .blocks
+                .indexed_iter()
+                .map(|(idx, block)| (cast_(idx), *block))
+                .filter(|(_idx, block)| block.id == Block::LANTERN.id)
+                .collect::<Vec<_>>();
+
+            let blocks = self
+                .blocks
+                .indexed_iter()
+                .map(|(idx, block)| (cast_(idx), *block))
+                .collect::<Vec<_>>();
+
+            let mut new_chunk = None;
+            for (light_source_pos, _light_source_block) in light_sources {
+                let strength = 10;
+
+                for (pos, _b) in blocks.iter().cloned() {
+                    let distance = light_source_pos.distance_squared(pos);
+                    if distance > (strength as i32).pow(2) {
+                        continue;
+                    }
+
+                    // match raycast(
+                    //     pos.as_(),
+                    //     (light_source_pos.as_::<f32>() - pos.as_::<f32>())
+                    //         .try_normalized()
+                    //         .unwrap_or_default(),
+                    //     strength as f32,
+                    //     self.blocks.view(),
+                    // ) {
+                    //     None => continue,
+                    //     Some(raycast_output) => {
+                    //         if pos != raycast_output.position {
+                    //             continue;
+                    //         }
+                    //     }
+                    // }
+
+                    if let Some(entry) = self.get_block(pos) {
+                        let light = strength - (distance.sqrt() as u8);
+                        if entry.light != light {
+                            let chunk = new_chunk.get_or_insert_with(|| {
+                                Rc::unwrap_or_clone(Rc::clone(&self.blocks))
+                            });
+                            chunk[pos.map(|e| e as _).into_tuple()].light = light;
+                        }
+                    }
+                }
+            }
+
+            if let Some(new_blocks) = new_chunk {
+                self.blocks = Rc::new(new_blocks);
+            }
+        }
+
+        // Light from sky
+        // {
+        //     let blocks = self
+        //         .blocks
+        //         .indexed_iter()
+        //         .map(|(idx, block)| (cast_(idx), *block))
+        //         .collect::<Vec<_>>();
+
+        //     let mut new_chunk = None;
+        //     for (block_pos, block) in blocks.iter().filter(|(_, b)| b.id != Block::AIR.id) {
+        //         if block.light != 15 {
+        //             let free_sky = blocks.iter().all(|(pos, block)| {
+        //                 if pos.x != block_pos.x || pos.z != block_pos.z || pos.y <= block_pos.y {
+        //                     return true;
+        //                 }
+
+        //                 block.id == Block::AIR.id
+        //             });
+        //             if free_sky {
+        //                 let chunk = new_chunk
+        //                     .get_or_insert_with(|| Rc::unwrap_or_clone(Rc::clone(&self.blocks)));
+        //                 chunk[block_pos.map(|e| e as _).into_tuple()].light = 15;
+        //             }
+        //         }
+        //     }
+
+        //     if let Some(new_blocks) = new_chunk {
+        //         self.blocks = Rc::new(new_blocks);
+        //     }
+        // }
+    }
+
     fn modify_chunk(&mut self, f: impl FnOnce(&mut Array3<Block>) -> bool) {
-        let mut blocks = Rc::<_>::unwrap_or_clone(self.blocks.clone());
+        let mut blocks = Rc::unwrap_or_clone(Rc::clone(&self.blocks));
         if f(&mut blocks) {
             self.blocks = Rc::new(blocks);
         }
@@ -205,7 +317,8 @@ impl Game {
                 *entry = block;
                 return true;
             }
-            return false;
+
+            false
         });
     }
 

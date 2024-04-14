@@ -26,6 +26,7 @@ impl GameRenderer {
             &[
                 DataSource::Inline(include_bytes!("../../textures/test.png")),
                 DataSource::Inline(include_bytes!("../../textures/grass.png")),
+                DataSource::Inline(include_bytes!("../../textures/test.png")),
             ],
         );
 

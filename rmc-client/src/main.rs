@@ -202,11 +202,14 @@ fn main() {
                 .position([0.0, 0.0], imgui::Condition::Always)
                 .always_auto_resize(true)
                 .build(|| {
-                    ui.text(format!("FPS: {:.0}", fps));
+                    ui.text(format!("FPS: {:.0} ({:.0}ms)", fps, (1.0 / fps) * 1000.0));
                     ui.text(format!("Position: {:.2}", game.curr.camera.position));
                     ui.text(format!(
-                        "Highlight: {:?}",
-                        game.curr.look_at_raycast.map(|r| r.position)
+                        "Highlight: {:?} ({:?})",
+                        game.curr.look_at_raycast.map(|r| r.position),
+                        game.curr
+                            .look_at_raycast
+                            .map(|r| game.curr.get_block(r.position)),
                     ));
                     ui.text(format!(
                         "Orientation: {:.2} {:.2} ({:.2})",
