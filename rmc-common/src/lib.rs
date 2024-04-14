@@ -1,5 +1,6 @@
 use ndarray::Array3;
 use std::{
+    collections::{HashSet, VecDeque},
     ops::{Add, Mul, Neg, Sub},
     rc::Rc,
 };
@@ -29,7 +30,13 @@ impl Blend for f32 {
 
 impl Blend for i32 {
     fn blend(&self, other: &Self, alpha: f32) -> Self {
-        (*self as f32).blend(&(*other as f32), alpha) as i32
+        (*self as f32).blend(&(*other as f32), alpha) as _
+    }
+}
+
+impl Blend for usize {
+    fn blend(&self, other: &Self, alpha: f32) -> Self {
+        (*self as f32).blend(&(*other as f32), alpha) as _
     }
 }
 
@@ -93,6 +100,9 @@ impl<T: DiscreteBlend + Clone> Blend for T {
 pub trait DiscreteBlend {}
 
 impl DiscreteBlend for bool {}
+impl<T> DiscreteBlend for Vec<T> {}
+impl<T> DiscreteBlend for VecDeque<T> {}
+impl<T> DiscreteBlend for HashSet<T> {}
 
 pub trait Apply: Sized {
     /// Apply a function to this value and return the (possibly) modified value.

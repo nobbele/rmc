@@ -2,14 +2,18 @@ use crate::{
     camera::Angle,
     input::InputState,
     physics::{sweep_test, SweepBox, SweepTestResult},
-    world::{raycast, Block, RaycastOutput},
+    world::{face_to_normal, raycast, Block, RaycastOutput},
     Blend, Camera,
 };
+use itertools::Itertools;
 use lazy_static::lazy_static;
 use ndarray::Array3;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
-use std::{cmp::Ordering, rc::Rc};
-use vek::{num_integer::Roots, Aabb, Extent3, Vec3};
+use std::{
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+};
+use vek::{Aabb, Extent3, Vec3};
 
 pub const TICK_RATE: u32 = 16;
 pub const TICK_SPEED: f32 = 1.0;
@@ -26,7 +30,7 @@ const SPEED: f32 = 4.0;
 const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 2.0, 0.2);
 const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Game {
     pub blocks: Rc<Array3<Block>>,
 
@@ -34,8 +38,11 @@ pub struct Game {
     pub velocity: Vec3<f32>,
 
     pub on_ground: bool,
-
     pub look_at_raycast: Option<RaycastOutput>,
+
+    pub dirty_blocks: VecDeque<Vec3<i32>>,
+    // This is per frame
+    pub block_update_count: usize,
 }
 
 impl Game {
@@ -49,7 +56,6 @@ impl Game {
             }
         }
 
-        blocks[(6, 11, 8)] = Block::LANTERN;
         blocks[(6, 11, 7)] = Block::AIR;
         blocks[(6, 11, 9)] = Block::AIR;
         blocks[(7, 11, 8)] = Block::AIR;
@@ -69,7 +75,7 @@ impl Game {
         blocks[(5, 10, 7)] = Block::AIR;
         blocks[(5, 10, 9)] = Block::AIR;
 
-        Game {
+        let mut game = Game {
             blocks: Rc::new(blocks),
 
             camera: Camera {
@@ -82,7 +88,13 @@ impl Game {
             on_ground: false,
 
             look_at_raycast: None,
-        }
+            dirty_blocks: VecDeque::new(),
+            block_update_count: 0,
+        };
+
+        game.set_block(Vec3::new(6, 11, 8), Block::LANTERN);
+
+        game
     }
 
     pub fn update(&mut self, input: &InputState) {
@@ -104,7 +116,8 @@ impl Game {
         );
 
         self.handle_place_destroy(input);
-        self.update_lighting();
+        // self.update_lighting();
+        self.update_blocks();
     }
 
     fn handle_camera_movement(&mut self, input: &InputState) {
@@ -172,7 +185,7 @@ impl Game {
                 .map(|(idx, block)| (idx, if block.id == 0 { None } else { Some(block) }))
                 .filter_map(|(idx, block)| block.map(|b| (idx, b)))
                 // WTF How does this improve the collision detection???
-                .collect::<Vec<_>>()
+                .collect_vec()
                 .into_iter()
                 .rev()
             {
@@ -209,121 +222,130 @@ impl Game {
         }
     }
 
-    fn update_lighting(&mut self) {
-        fn cast_(utup: (usize, usize, usize)) -> Vec3<i32> {
-            Vec3::new(utup.0 as i32, utup.1 as i32, utup.2 as i32)
-        }
+    fn update_blocks(&mut self) {
+        const MAX_UPDATES_COUNT: usize = 8192;
 
-        // Light sources
-        {
-            let light_sources = self
-                .blocks
-                .indexed_iter()
-                .map(|(idx, block)| (cast_(idx), *block))
-                .filter(|(_idx, block)| block.id == Block::LANTERN.id)
-                .collect::<Vec<_>>();
+        self.block_update_count = 0;
 
-            let blocks = self
-                .blocks
-                .indexed_iter()
-                .map(|(idx, block)| (cast_(idx), *block))
-                .collect::<Vec<_>>();
+        while self.block_update_count < MAX_UPDATES_COUNT && self.dirty_blocks.len() != 0 {
+            let update_count = self.dirty_blocks.len().min(MAX_UPDATES_COUNT);
+            self.block_update_count += update_count;
 
-            let mut new_chunk = None;
-            for (light_source_pos, _light_source_block) in light_sources {
-                let strength = 10;
+            let dirty_blocks = self.dirty_blocks.drain(..update_count).collect_vec();
 
-                for (pos, _b) in blocks.iter().cloned() {
-                    let distance = light_source_pos.distance_squared(pos);
-                    if distance > (strength as i32).pow(2) {
-                        continue;
-                    }
+            // println!(
+            //     "----------- ({:03} / {:03}) -----------",
+            //     dirty_blocks.len(),
+            //     dirty_blocks.len() + self.dirty_blocks.len()
+            // );
 
-                    // match raycast(
-                    //     pos.as_(),
-                    //     (light_source_pos.as_::<f32>() - pos.as_::<f32>())
-                    //         .try_normalized()
-                    //         .unwrap_or_default(),
-                    //     strength as f32,
-                    //     self.blocks.view(),
-                    // ) {
-                    //     None => continue,
-                    //     Some(raycast_output) => {
-                    //         if pos != raycast_output.position {
-                    //             continue;
-                    //         }
-                    //     }
-                    // }
+            let mut replaces = HashMap::new();
+            for position in dirty_blocks {
+                let Some(block) = self.get_block(position) else {
+                    continue;
+                };
 
-                    if let Some(entry) = self.get_block(pos) {
-                        let light = strength - (distance.sqrt() as u8);
-                        if entry.light != light {
-                            let chunk = new_chunk.get_or_insert_with(|| {
-                                Rc::unwrap_or_clone(Rc::clone(&self.blocks))
-                            });
-                            chunk[pos.map(|e| e as _).into_tuple()].light = light;
-                        }
-                    }
+                if replaces.contains_key(&position) {
+                    continue;
                 }
-            }
 
-            if let Some(new_blocks) = new_chunk {
-                self.blocks = Rc::new(new_blocks);
-            }
-        }
+                const INCLUDE_DIAGONAL: bool = true;
 
-        // Calculate sky openness
-        {
-            let mut blocks = self
-                .blocks
-                .indexed_iter()
-                .map(|(idx, block)| (cast_(idx), *block))
-                .collect::<Vec<_>>();
+                let neighbor_positions =
+                    [0, 1, 2, 3, 4, 5].map(|face| position + face_to_normal(face));
+                let neighbors = if INCLUDE_DIAGONAL {
+                    neighbor_positions
+                        .into_iter()
+                        .chain(
+                            [
+                                Vec3::new(1, 1, 1),
+                                Vec3::new(1, 1, -1),
+                                Vec3::new(1, -1, 1),
+                                Vec3::new(1, -1, -1),
+                                Vec3::new(-1, 1, 1),
+                                Vec3::new(-1, 1, -1),
+                                Vec3::new(-1, -1, 1),
+                                Vec3::new(-1, -1, -1),
+                            ]
+                            .into_iter()
+                            .map(|o| position + o),
+                        )
+                        .map(|position| (position, self.get_block(position)))
+                        .collect_vec()
+                } else {
+                    neighbor_positions
+                        .map(|position| (position, self.get_block(position)))
+                        .to_vec()
+                };
 
-            blocks.sort_by(|a, b| b.0.y.partial_cmp(&a.0.y).unwrap_or(Ordering::Equal));
-
-            let mut new_chunk = None;
-            for (pos, block) in blocks {
-                let is_open_to_sky = pos.y == 15
-                    || matches!(
-                        self.get_block(pos + Vec3::unit_y()),
-                        None | Some(Block {
-                            id: 0,
-                            open_to_sky: true,
-                            ..
+                let light = match () {
+                    _ if block.id == Block::LANTERN.id => 255,
+                    _ if block.id == Block::AIR.id => neighbors
+                        .iter()
+                        .map(|&(p, b)| {
+                            b.map(|b| {
+                                let distance = position.as_::<f32>().distance(p.as_::<f32>());
+                                assert!(distance <= 2.0);
+                                b.light.checked_sub((16.0 * distance) as u8)
+                            })
+                            .flatten()
+                            .unwrap_or(0)
                         })
-                    );
-                if block.open_to_sky != is_open_to_sky {
-                    let chunk = new_chunk
-                        .get_or_insert_with(|| Rc::unwrap_or_clone(Rc::clone(&self.blocks)));
-                    chunk[pos.map(|e| e as _).into_tuple()].open_to_sky = is_open_to_sky;
+                        .max()
+                        .unwrap_or(0),
+                    _ => 0,
+                };
+
+                let new_block = Block { light, ..block };
+
+                if block != new_block {
+                    self.dirty_blocks
+                        .extend(neighbors.into_iter().map(|(p, _b)| p));
+                    replaces.insert(position, new_block);
                 }
             }
-            if let Some(new_blocks) = new_chunk {
-                self.blocks = Rc::new(new_blocks);
-            }
+            self.replace_blocks1(replaces.into_iter(), false);
         }
     }
 
-    fn modify_chunk(&mut self, f: impl FnOnce(&mut Array3<Block>) -> bool) {
-        let mut blocks = Rc::unwrap_or_clone(Rc::clone(&self.blocks));
-        if f(&mut blocks) {
-            self.blocks = Rc::new(blocks);
+    pub fn replace_blocks(&mut self, replaces: impl Iterator<Item = (Vec3<i32>, Block)>) {
+        self.replace_blocks1(replaces, true);
+    }
+
+    pub fn replace_blocks1(
+        &mut self,
+        replaces: impl Iterator<Item = (Vec3<i32>, Block)>,
+        update: bool,
+    ) {
+        if replaces.size_hint().1 == Some(0) {
+            return;
         }
+
+        let mut blocks = Rc::unwrap_or_clone(Rc::clone(&self.blocks));
+        for (position, block) in replaces {
+            if position.into_iter().all(|e| e >= 0) {
+                if let Some(target) = blocks.get_mut(position.map(|e| e as _).into_tuple()) {
+                    if *target != block {
+                        if update {
+                            self.dirty_blocks.push_back(position);
+                        }
+                        *target = block;
+                    }
+                }
+            }
+        }
+        self.blocks = Rc::new(blocks);
     }
 
     pub fn set_block(&mut self, position: Vec3<i32>, block: Block) {
-        self.modify_chunk(|chunk| {
-            if let Some(entry) = chunk.get_mut(position.map(|e| e as _).into_tuple()) {
-                *entry = block;
-                return true;
-            }
-
-            false
-        });
+        self.set_block1(position, block, true);
     }
 
-    pub fn get_block(&mut self, position: Vec3<i32>) -> Option<Block> {
+    pub fn set_block1(&mut self, position: Vec3<i32>, block: Block, update: bool) {
+        self.replace_blocks1([(position, block)].into_iter(), update);
+    }
+
+    pub fn get_block(&self, position: Vec3<i32>) -> Option<Block> {
         // TODO chunks
         if !position.iter().all(|e| *e >= 0) {
             return None;
@@ -360,6 +382,10 @@ impl Blend for Game {
             on_ground: self.on_ground.blend(&other.on_ground, alpha),
 
             look_at_raycast: self.look_at_raycast.blend(&other.look_at_raycast, alpha),
+            dirty_blocks: self.dirty_blocks.blend(&other.dirty_blocks, alpha),
+            block_update_count: self
+                .block_update_count
+                .blend(&other.block_update_count, alpha),
         }
     }
 }

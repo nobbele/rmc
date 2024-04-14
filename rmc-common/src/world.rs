@@ -9,30 +9,13 @@ use crate::DiscreteBlend;
 pub struct Block {
     pub id: u8,
     pub light: u8,
-    pub open_to_sky: bool,
 }
 
 impl Block {
-    pub const AIR: Block = Block {
-        id: 0,
-        light: 1,
-        open_to_sky: false,
-    };
-    pub const TEST: Block = Block {
-        id: 1,
-        light: 7,
-        open_to_sky: false,
-    };
-    pub const GRASS: Block = Block {
-        id: 2,
-        light: 7,
-        open_to_sky: false,
-    };
-    pub const LANTERN: Block = Block {
-        id: 3,
-        light: 7,
-        open_to_sky: false,
-    };
+    pub const AIR: Block = Block { id: 0, light: 0 };
+    pub const TEST: Block = Block { id: 1, light: 0 };
+    pub const GRASS: Block = Block { id: 2, light: 0 };
+    pub const LANTERN: Block = Block { id: 3, light: 0 };
 }
 
 impl DiscreteBlend for Block {}
@@ -135,6 +118,18 @@ pub fn raycast(
             Some(Block { id: 1.., .. })
         )
     })
+}
+
+pub fn face_to_normal(face: u8) -> Vec3<i32> {
+    match face {
+        0 => Vec3::new(1, 0, 0),
+        1 => Vec3::new(0, 1, 0),
+        2 => Vec3::new(0, 0, 1),
+        3 => Vec3::new(-1, 0, 0),
+        4 => Vec3::new(0, -1, 0),
+        5 => Vec3::new(0, 0, -1),
+        _ => unreachable!(),
+    }
 }
 
 #[cfg(test)]

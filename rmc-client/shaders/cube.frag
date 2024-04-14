@@ -16,6 +16,6 @@ void main() {
     vec3 highlightColor = vert_Highlighted > 0.5 ? vec3(0.5, 0.5, 0.5) : vec3(0.0, 0.0, 0.0);
 
     // frag_Color = vec4(texel + highlightColor, 1.0);
-    float lightStrength = float(vert_Light) / 15.0;
+    float lightStrength = float(vert_Light) / 255.0;
     frag_Color = vec4(lightStrength * texel + highlightColor, 1.0);
 }

@@ -6,7 +6,7 @@ use rmc_common::{
     lerp, Blend, Game, LookBack,
 };
 use sdl2::{event::Event, keyboard::Keycode};
-use std::collections::HashMap;
+use std::{collections::HashMap, process::exit, time::Instant};
 use texture::{load_texture, DataSource};
 use vek::Vec2;
 
@@ -173,6 +173,8 @@ fn main() {
             let ui = imgui.new_frame();
 
             while accumulator >= TICK_DELTA {
+                let start_of_tick = Instant::now();
+
                 input_state.update_held_status();
                 for keycode in keyboard_buffer.keys().collect::<Vec<_>>() {
                     if let Some(event) = keyboard_buffer.pull(keycode) {
@@ -196,6 +198,12 @@ fn main() {
                 }
 
                 accumulator -= TICK_DELTA;
+
+                let end_of_tick = Instant::now();
+                if end_of_tick.duration_since(start_of_tick).as_secs_f32() > 0.1 {
+                    println!("Game is running too slow!");
+                    exit(-1);
+                }
             }
 
             ui.window("Debug")
@@ -203,14 +211,25 @@ fn main() {
                 .always_auto_resize(true)
                 .build(|| {
                     ui.text(format!("FPS: {:.0} ({:.0}ms)", fps, (1.0 / fps) * 1000.0));
+                    ui.text(format!("Updates: {:.0}", game.curr.block_update_count));
                     ui.text(format!("Position: {:.2}", game.curr.camera.position));
                     ui.text(format!(
-                        "Highlight: {:?} ({:?})",
-                        game.curr.look_at_raycast.map(|r| r.position),
+                        "Highlight: {:?} ({:?}) (light: {})",
+                        game.curr
+                            .look_at_raycast
+                            .map(|r| r.position)
+                            .unwrap_or_default(),
                         game.curr
                             .look_at_raycast
                             .map(|r| game.curr.get_block(r.position))
-                            .flatten(),
+                            .flatten()
+                            .unwrap_or_default(),
+                        game.curr
+                            .look_at_raycast
+                            .map(|r| game.curr.get_block(r.position + r.normal.as_()))
+                            .flatten()
+                            .map(|b| b.light)
+                            .unwrap_or_default(),
                     ));
                     ui.text(format!(
                         "Orientation: {:.2} {:.2} ({:.2})",

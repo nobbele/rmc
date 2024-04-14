@@ -3,20 +3,8 @@ use std::mem;
 use bytemuck::offset_of;
 use glow::HasContext;
 use ndarray::ArrayView3;
-use rmc_common::world::Block;
+use rmc_common::world::{face_to_normal, Block};
 use vek::{Vec2, Vec3};
-
-fn face_to_normal(face: u8) -> Vec3<i32> {
-    match face {
-        0 => Vec3::new(1, 0, 0),
-        1 => Vec3::new(0, 1, 0),
-        2 => Vec3::new(0, 0, 1),
-        3 => Vec3::new(-1, 0, 0),
-        4 => Vec3::new(0, -1, 0),
-        5 => Vec3::new(0, 0, -1),
-        _ => unreachable!(),
-    }
-}
 
 /*
 push(generate_face(
@@ -142,7 +130,7 @@ fn generate_face(normal: Vec3<f32>, texture_origin: Vec2<f32>, face: u8) -> [Ver
 }
 
 fn get_block_light(blocks: ArrayView3<Block>, pos: Vec3<i32>) -> u8 {
-    if pos.are_all_positive() {
+    if pos.into_iter().all(|e| e >= 0) {
         if let Some(block) = blocks.get(pos.map(|e| e as usize).into_tuple()) {
             return block.light;
         }
@@ -303,15 +291,8 @@ impl ChunkRenderer {
                     .map(|(pos, block)| Instance {
                         position: pos.as_(),
                         texture: block.id - 1,
-                        light: {
-                            let mut light = [0, 1, 2, 3, 4, 5]
-                                .map(|face| get_block_light(blocks, pos + face_to_normal(face)));
-                            if block.open_to_sky {
-                                light[1] = 15;
-                            }
-
-                            light
-                        },
+                        light: [0, 1, 2, 3, 4, 5]
+                            .map(|face| get_block_light(blocks, pos + face_to_normal(face))),
                     })
                     .collect::<Vec<_>>()
                     .as_slice(),

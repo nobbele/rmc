@@ -11,7 +11,7 @@ vek = "0.16.1"
 lazy_static = "1.4.0"
 itertools = "0.12.1"
 
-# imgui = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
+# inline_tweak = "1.1.1"
 
 # Needed for keycodes
 sdl2 = "0.36"
