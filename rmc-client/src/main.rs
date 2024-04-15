@@ -72,6 +72,15 @@ fn main() {
             &gl,
             DataSource::Inline(include_bytes!("../textures/crosshair.png")),
         );
+        let slot_image = load_image(
+            &gl,
+            DataSource::Inline(include_bytes!("../textures/slot.png")),
+        );
+        let active_slot_image = load_image(
+            &gl,
+            DataSource::Inline(include_bytes!("../textures/active-slot.png")),
+        );
+
         let screen_quad_renderer = ScreenQuadRenderer::new(&gl);
 
         let mut game = LookBack::new_identical(Game::new());
@@ -310,6 +319,34 @@ fn main() {
                     .position(Vec2::new(1024.0, 768.0) / 2.0)
                     .origin(Vec2::one() / 2.0),
             );
+
+            // Hotbar
+            {
+                let scale = Vec2::one() * 5.0;
+                let x_max = 9 * slot_image.size.x;
+                let x_start = 1024.0 / 2.0 - x_max as f32 * scale.x / 2.0;
+                for i in 0..9 {
+                    let x_offset = i * slot_image.size.x;
+
+                    let x = x_start + x_offset as f32 * scale.x;
+                    let y = 768.0 - 32.0;
+
+                    screen_quad_renderer.draw(
+                        &gl,
+                        if i as usize == game.curr.hotbar.active {
+                            &active_slot_image
+                        } else {
+                            &slot_image
+                        },
+                        DrawParams::default()
+                            .scale(scale)
+                            .position(Vec2::new(x, y))
+                            .origin(Vec2::new(0.0, 1.0)),
+                    );
+                }
+
+                // TODO isometric render of blocks.
+            }
 
             window.gl_swap_window();
 

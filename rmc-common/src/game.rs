@@ -5,7 +5,7 @@ use crate::{
     light::calculate_block_light,
     raycast::{raycast, RaycastOutput},
     world::{face_neighbors, Chunk, World, CHUNK_SIZE},
-    Blend, Block, BlockType, Camera,
+    Blend, Block, BlockType, Camera, DiscreteBlend,
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -34,6 +34,32 @@ pub struct BlockUpdate {
     pub source: Option<Vec3<i32>>,
 }
 
+#[derive(Clone, Copy)]
+pub enum Item {}
+
+#[derive(Clone, Copy)]
+pub enum ItemOrBlock {
+    Item(Item),
+    Block(BlockType),
+}
+
+#[derive(Clone, Copy)]
+pub struct Hotbar {
+    pub slots: [Option<ItemOrBlock>; 9],
+    pub active: usize,
+}
+
+impl Hotbar {
+    pub fn new() -> Self {
+        Hotbar {
+            slots: [None; 9],
+            active: 0,
+        }
+    }
+}
+
+impl DiscreteBlend for Hotbar {}
+
 #[derive(Clone)]
 pub struct Game {
     pub world: World,
@@ -47,6 +73,8 @@ pub struct Game {
     pub dirty_blocks: VecDeque<BlockUpdate>,
     // This is per frame
     pub block_update_count: usize,
+
+    pub hotbar: Hotbar,
 }
 
 fn initialize_chunk(world: &mut World, chunk: Vec3<i32>) {
@@ -130,10 +158,13 @@ impl Game {
             look_at_raycast: None,
             dirty_blocks: VecDeque::new(),
             block_update_count: 0,
+
+            hotbar: Hotbar::new(),
         };
 
         game.set_block(Vec3::new(6, 14, 8), Block::LANTERN);
         game.set_block(Vec3::new(-8, 14, -8), Block::LANTERN);
+        game.hotbar.slots[0] = Some(ItemOrBlock::Block(BlockType::Wood));
 
         game
     }
@@ -411,7 +442,9 @@ impl Game {
             if input.get_mouse_button(MouseButton::Right).just_pressed() {
                 let position = highlighted.position + highlighted.normal.numcast().unwrap();
 
-                self.set_block(position, Block::WOOD);
+                if let Some(ItemOrBlock::Block(block_ty)) = self.hotbar.slots[self.hotbar.active] {
+                    self.set_block(position, Block::new(block_ty));
+                }
             }
 
             if input.get_mouse_button(MouseButton::Middle).just_pressed() {
@@ -446,6 +479,8 @@ impl Blend for Game {
             block_update_count: self
                 .block_update_count
                 .blend(&other.block_update_count, alpha),
+
+            hotbar: self.hotbar.blend(&other.hotbar, alpha),
         }
     }
 }
