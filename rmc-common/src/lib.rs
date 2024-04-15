@@ -4,13 +4,16 @@ use vek::num_traits::{One, Zero};
 pub mod game;
 pub mod world;
 pub use game::Game;
+pub mod collision;
 pub mod input;
 pub mod light;
-pub mod physics;
+pub mod raycast;
 
 mod blend;
+mod block;
 mod camera;
 pub use blend::{Blend, DiscreteBlend};
+pub use block::{Block, BlockType};
 pub use camera::Camera;
 
 pub trait Apply: Sized {

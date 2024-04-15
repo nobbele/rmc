@@ -1,82 +1,10 @@
-use std::{cmp::Ordering, rc::Rc};
+use std::rc::Rc;
 
-use enum_assoc::Assoc;
 use itertools::Itertools;
 use ndarray::Array3;
 use vek::Vec3;
 
-use crate::DiscreteBlend;
-
-#[derive(Debug, Default, PartialEq, Eq, Copy, Clone, Assoc)]
-#[func(pub fn light_emission(&self) -> Option<u8>)]
-#[func(pub fn light_passing(&self) -> bool { false })]
-pub enum BlockType {
-    #[default]
-    #[assoc(light_passing = true)]
-    Air,
-    Test,
-    Grass,
-    #[assoc(light_emission = 224)]
-    Lantern,
-    #[assoc(light_passing = true)]
-    Mesh,
-    Wood,
-}
-
-#[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
-pub struct Block {
-    pub ty: BlockType,
-    pub light: u8,
-    pub open_to_sky: bool,
-}
-
-impl Block {
-    pub fn not_air(self) -> Option<Block> {
-        if self.ty == BlockType::Air {
-            return None;
-        }
-
-        Some(self)
-    }
-}
-
-impl Block {
-    pub const AIR: Block = Block {
-        ty: BlockType::Air,
-        light: 0,
-        open_to_sky: false,
-    };
-    pub const TEST: Block = Block {
-        ty: BlockType::Test,
-        light: 0,
-        open_to_sky: false,
-    };
-    pub const GRASS: Block = Block {
-        ty: BlockType::Grass,
-        light: 0,
-        open_to_sky: false,
-    };
-    pub const LANTERN: Block = Block {
-        ty: BlockType::Lantern,
-        light: 0,
-        open_to_sky: false,
-    };
-
-    // Transparent rendering is hard :(
-    pub const MESH: Block = Block {
-        ty: BlockType::Mesh,
-        light: 0,
-        open_to_sky: false,
-    };
-
-    pub const WOOD: Block = Block {
-        ty: BlockType::Wood,
-        light: 0,
-        open_to_sky: false,
-    };
-}
-
-impl DiscreteBlend for Block {}
+use crate::{Block, DiscreteBlend};
 
 pub const CHUNK_SIZE: usize = 16;
 
@@ -108,7 +36,9 @@ impl Default for Chunk {
 #[derive(Clone)]
 pub struct World {
     pub origin: Vec3<i32>,
-    pub chunks: Array3<Chunk>,
+
+    // None means unloaded
+    pub chunks: Array3<Option<Chunk>>,
 
     // Half width to the sides, excluding middle. i.e (chunks.dim() - 1) / 2
     pub extents: Vec3<i32>,
@@ -118,7 +48,10 @@ impl World {
     pub fn new(origin: Vec3<i32>) -> Self {
         let extents = Vec3::one();
         World {
-            chunks: Array3::default((extents * 2 + Vec3::one()).as_().into_tuple()),
+            chunks: Array3::from_shape_simple_fn(
+                (extents * 2 + Vec3::one()).as_().into_tuple(),
+                || Some(Chunk::default()),
+            ),
             extents,
             origin,
         }
@@ -144,12 +77,15 @@ impl World {
         self.chunks
             .get(self.chunk_index(position)?.into_tuple())
             .cloned()
+            .flatten()
     }
 
     /// World coords to chunk.
     pub fn chunk_at_mut(&mut self, position: Vec3<i32>) -> Option<&mut Chunk> {
         self.chunks
             .get_mut(self.chunk_index(position)?.into_tuple())
+            .map(|r| r.as_mut())
+            .flatten()
     }
 
     pub fn get_block(&self, position: Vec3<i32>) -> Option<Block> {
@@ -169,11 +105,13 @@ impl World {
     }
 
     pub fn chunks_iter(&self) -> impl Iterator<Item = (Vec3<i32>, Chunk)> + '_ {
-        self.chunks.indexed_iter().map(|(index, chunk)| {
-            (
-                Vec3::<usize>::from(index).as_::<i32>() - self.extents + self.origin,
-                chunk.clone(),
-            )
+        self.chunks.indexed_iter().filter_map(|(index, chunk)| {
+            chunk.clone().map(|chunk| {
+                (
+                    Vec3::<usize>::from(index).as_::<i32>() - self.extents + self.origin,
+                    chunk,
+                )
+            })
         })
     }
 }
@@ -196,7 +134,7 @@ fn test_world() {
 
     assert_eq!(world.get_block(Vec3::new(-4, 4, -2)), Some(Block::AIR));
 
-    let chunk = &mut world.chunks[(0, 1, 0)];
+    let chunk = (&mut world.chunks[(0, 1, 0)]).as_mut().unwrap();
     let mut new_blocks = Rc::unwrap_or_clone(Rc::clone(&chunk.blocks));
     new_blocks[(12, 4, 14)] = Block::GRASS;
     chunk.blocks = Rc::new(new_blocks);
@@ -206,105 +144,6 @@ fn test_world() {
     assert_eq!(world.get_block(Vec3::new(-4, 4, -1)), Some(Block::AIR));
     world.set_block(Vec3::new(-4, 4, -1), Block::GRASS);
     assert_eq!(world.get_block(Vec3::new(-4, 4, -1)), Some(Block::GRASS));
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct RaycastOutput {
-    pub position: Vec3<i32>,
-    pub normal: Vec3<i8>,
-}
-
-impl DiscreteBlend for RaycastOutput {}
-
-pub fn raycast_generalized<F: FnMut(Vec3<i32>) -> bool>(
-    pos: Vec3<f32>,
-    dir: Vec3<f32>,
-    radius: f32,
-    voxel_size: f32,
-    mut has_voxel: F,
-) -> Option<RaycastOutput> {
-    if dir.normalized().magnitude() == 0.0 {
-        return None;
-    }
-
-    let step = dir.map(|e| e.signum() as i32);
-    let t_delta = (Vec3::broadcast(voxel_size) / dir).map(|e| e.abs());
-
-    let ipos = pos.floor().map(|e| e as i32);
-    if has_voxel(ipos) {
-        return Some(RaycastOutput {
-            position: ipos,
-            normal: Vec3::zero(),
-        });
-    }
-
-    let dist = step.zip(ipos).zip(pos).map(|((e_step, e_ipos), e_pos)| {
-        if e_step > 0 {
-            e_ipos as f32 + voxel_size - e_pos
-        } else {
-            e_pos - e_ipos as f32
-        }
-    });
-
-    let mut grid_pos = ipos;
-    let mut t_max = t_delta.zip(dist).map(|(e_delta, e_dist)| {
-        if e_delta < f32::INFINITY {
-            e_delta * e_dist
-        } else {
-            f32::INFINITY
-        }
-    });
-
-    while pos.distance(grid_pos.map(|e| e as f32)) <= radius {
-        let min_axis = t_max
-            .into_iter()
-            .enumerate()
-            .min_by(|&a, &b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal))
-            .unwrap()
-            .0;
-
-        grid_pos[min_axis] += step[min_axis];
-        t_max[min_axis] += t_delta[min_axis];
-
-        if pos.distance(grid_pos.map(|e| e as f32)) > radius {
-            break;
-        }
-
-        if has_voxel(grid_pos) {
-            return Some(RaycastOutput {
-                position: grid_pos,
-                normal: {
-                    let mut v = Vec3::zero();
-                    v[min_axis] = -dir[min_axis].signum() as i8;
-                    v
-                },
-            });
-        }
-    }
-
-    None
-}
-
-pub fn raycast_candidates(pos: Vec3<f32>, dir: Vec3<f32>, radius: f32) -> Vec<Vec3<i32>> {
-    let mut blocks = Vec::new();
-    raycast_generalized(pos, dir, radius, 1.0, |grid_pos| {
-        blocks.push(grid_pos);
-        false
-    });
-    blocks
-}
-
-pub fn raycast(
-    pos: Vec3<f32>,
-    dir: Vec3<f32>,
-    radius: f32,
-    get_block: impl Fn(Vec3<i32>) -> Option<Block>,
-) -> Option<RaycastOutput> {
-    raycast_generalized(pos, dir, radius, 1.0, |grid_pos| {
-        get_block(grid_pos)
-            .map(|b| b.ty != BlockType::Air)
-            .unwrap_or(false)
-    })
 }
 
 pub fn face_to_normal(face: u8) -> Vec3<i32> {
@@ -343,206 +182,4 @@ pub fn surrounding_neighbors(position: Vec3<i32>) -> [Vec3<i32>; 6 + 8] {
         .collect_vec()
         .try_into()
         .unwrap()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_raycast_candidates() {
-        assert_eq!(
-            raycast_candidates(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(1.0, 0.4, 0.0),
-                4.0
-            ),
-            vec![
-                Vec3 { x: 8, y: 8, z: 0 },
-                Vec3 { x: 9, y: 8, z: 0 },
-                Vec3 { x: 10, y: 8, z: 0 },
-                Vec3 { x: 10, y: 9, z: 0 },
-                Vec3 { x: 11, y: 9, z: 0 }
-            ]
-        );
-        assert_eq!(
-            raycast_candidates(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(1.0, 0.0, 0.0),
-                4.0
-            ),
-            vec![
-                Vec3 { x: 8, y: 8, z: 0 },
-                Vec3 { x: 9, y: 8, z: 0 },
-                Vec3 { x: 10, y: 8, z: 0 },
-                Vec3 { x: 11, y: 8, z: 0 },
-                Vec3 { x: 12, y: 8, z: 0 }
-            ]
-        );
-
-        assert_eq!(
-            raycast_candidates(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(1.0, 0.0, 0.0),
-                4.0
-            ),
-            vec![
-                Vec3 { x: 8, y: 8, z: 0 },
-                Vec3 { x: 9, y: 8, z: 0 },
-                Vec3 { x: 10, y: 8, z: 0 },
-                Vec3 { x: 11, y: 8, z: 0 },
-                Vec3 { x: 12, y: 8, z: 0 }
-            ]
-        );
-
-        assert_eq!(
-            raycast_candidates(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(1.0, 0.0, 0.0),
-                0.1
-            ),
-            vec![Vec3 { x: 8, y: 8, z: 0 }]
-        );
-    }
-
-    #[test]
-    fn test_raycast2() {
-        let mut blocks: ndarray::Array3<Block> = ndarray::Array3::default((16, 16, 16));
-        blocks[(9, 8, 0)] = Block::TEST;
-        blocks[(9, 9, 0)] = Block::TEST;
-        blocks[(9, 10, 0)] = Block::TEST;
-
-        assert_eq!(
-            raycast(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(1.0, 0.4, 0.0),
-                16.0,
-                |pos| if pos.into_iter().all(|e| e >= 0) {
-                    blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-                } else {
-                    None
-                },
-            ),
-            Some(RaycastOutput {
-                position: Vec3::new(9, 8, 0),
-                normal: Vec3::new(-1, 0, 0),
-            })
-        );
-
-        assert_eq!(
-            raycast(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(1.0, 1.1, 0.0),
-                16.0,
-                |pos| if pos.into_iter().all(|e| e >= 0) {
-                    blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-                } else {
-                    None
-                },
-            ),
-            Some(RaycastOutput {
-                position: Vec3::new(9, 9, 0),
-                normal: Vec3::new(-1, 0, 0),
-            })
-        );
-
-        assert_eq!(
-            raycast(
-                vek::Vec3::new(8.0, 8.0, 0.0),
-                vek::Vec3::new(0.0, 1.0, 0.0),
-                16.0,
-                |pos| if pos.into_iter().all(|e| e >= 0) {
-                    blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-                } else {
-                    None
-                },
-            ),
-            None
-        );
-
-        assert_eq!(
-            raycast(
-                vek::Vec3::new(7.0, 7.0, 0.2),
-                vek::Vec3::new(1.0, 1.5, 0.2),
-                16.0,
-                |pos| if pos.into_iter().all(|e| e >= 0) {
-                    blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-                } else {
-                    None
-                },
-            ),
-            Some(RaycastOutput {
-                position: Vec3::new(9, 9, 0),
-                normal: Vec3::new(-1, 0, 0),
-            })
-        );
-
-        assert_eq!(
-            raycast(
-                vek::Vec3::new(8.0, 8.0, -0.2),
-                dbg!(vek::Vec3::new(1.0, 2.0, 0.2).normalized()),
-                16.0,
-                |pos| if pos.into_iter().all(|e| e >= 0) {
-                    blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-                } else {
-                    None
-                },
-            ),
-            Some(RaycastOutput {
-                position: Vec3::new(9, 10, 0),
-                normal: Vec3::new(0, 0, -1),
-            })
-        );
-    }
-
-    #[test]
-    fn test_raycast() {
-        let mut blocks: Array3<Block> = Array3::default((16, 16, 16));
-        for y in 0..16 {
-            for z in 0..16 {
-                for x in 0..16 {
-                    blocks[(x, y, z)] = Block::TEST;
-                }
-            }
-        }
-
-        fn look_at(yaw: f32, pitch: f32) -> Vec3<f32> {
-            Vec3::new(
-                yaw.sin() * pitch.cos(),
-                -pitch.sin(),
-                -yaw.cos() * pitch.cos(),
-            )
-        }
-
-        let Some(output) = raycast(
-            Vec3::new(8.0, 18.0, 8.0),
-            look_at(2.28, 1.14),
-            16.0,
-            |pos| {
-                if pos.into_iter().all(|e| e >= 0) {
-                    blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-                } else {
-                    None
-                }
-            },
-        ) else {
-            panic!("Raycast was none");
-        };
-
-        assert_eq!(output.position, Vec3::new(8, 15, 8));
-        assert_eq!(output.normal, Vec3::new(0, 1, 0));
-
-        let Some(output) = raycast(Vec3::new(8.0, 18.0, 8.0), look_at(1.9, 0.9), 16.0, |pos| {
-            if pos.into_iter().all(|e| e >= 0) {
-                blocks.get(pos.as_::<usize>().into_tuple()).cloned()
-            } else {
-                None
-            }
-        }) else {
-            panic!("Raycast was none");
-        };
-
-        assert_eq!(output.position, Vec3::new(9, 15, 8));
-        assert_eq!(output.normal, Vec3::new(0, 1, 0));
-    }
 }

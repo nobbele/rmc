@@ -3,7 +3,7 @@ use std::mem;
 use bytemuck::offset_of;
 use glow::HasContext;
 use ndarray::ArrayView3;
-use rmc_common::world::{face_neighbors, Block};
+use rmc_common::{world::face_neighbors, Block};
 use vek::{Vec2, Vec3};
 
 /*

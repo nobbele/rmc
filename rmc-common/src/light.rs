@@ -1,4 +1,7 @@
-use crate::world::{face_neighbors, Block, World};
+use crate::{
+    world::{face_neighbors, World},
+    Block,
+};
 use itertools::Itertools;
 use vek::Vec3;
 

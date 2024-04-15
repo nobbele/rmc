@@ -1,10 +1,11 @@
 use crate::{
     camera::Angle,
+    collision::{sweep_test, SweepBox, SweepTestResult},
     input::InputState,
     light::calculate_block_light,
-    physics::{sweep_test, SweepBox, SweepTestResult},
-    world::{face_neighbors, raycast, Block, BlockType, RaycastOutput, World, CHUNK_SIZE},
-    Blend, Camera,
+    raycast::{raycast, RaycastOutput},
+    world::{face_neighbors, World, CHUNK_SIZE},
+    Blend, Block, BlockType, Camera,
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
@@ -301,6 +302,7 @@ impl Game {
                 source,
             } in dirty_blocks
             {
+                // TODO If this fails, it should be put in some wait queue that gets flushed once a chunk loads.
                 let Some(block) = self.world.get_block(position) else {
                     continue;
                 };
