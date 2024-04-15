@@ -1,5 +1,5 @@
 use glow::HasContext;
-use renderers::ScreenQuadRenderer;
+use renderers::{screen_quad_renderer::DrawParams, ScreenQuadRenderer};
 use rmc_common::{
     game::{TICK_DELTA, TICK_SPEED},
     input::{ButtonBuffer, ButtonStateEvent, InputState, KeyboardEvent, MouseButtonEvent},
@@ -8,7 +8,7 @@ use rmc_common::{
 };
 use sdl2::{event::Event, keyboard::Keycode};
 use std::{collections::HashMap, process::exit, time::Instant};
-use texture::{load_texture, DataSource};
+use texture::{load_image, DataSource};
 use vek::Vec2;
 
 use crate::renderers::GameRenderer;
@@ -68,7 +68,7 @@ fn main() {
         gl.enable(glow::CULL_FACE);
         gl.clear_color(0.1, 0.2, 0.3, 1.0);
 
-        let crosshair_texture = load_texture(
+        let crosshair_image = load_image(
             &gl,
             DataSource::Inline(include_bytes!("../textures/crosshair.png")),
         );
@@ -297,10 +297,19 @@ fn main() {
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);
 
             game_renderer.draw(&gl, &game.prev.blend(&game.curr, accumulator / TICK_DELTA));
-            screen_quad_renderer.draw(&gl, crosshair_texture);
+
             imgui_renderer
                 .render(&gl, &imgui_textures, imgui.render())
                 .unwrap();
+
+            screen_quad_renderer.draw(
+                &gl,
+                &crosshair_image,
+                DrawParams::default()
+                    .scale(Vec2::one() * 4.0)
+                    .position(Vec2::new(1024.0, 768.0) / 2.0)
+                    .origin(Vec2::one() / 2.0),
+            );
 
             window.gl_swap_window();
 

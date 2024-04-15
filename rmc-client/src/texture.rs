@@ -1,16 +1,44 @@
 use glow::HasContext;
+use image::GenericImageView;
+use vek::Vec2;
 
 pub enum DataSource<'a, T: ?Sized> {
     Path(&'a str),
     Inline(&'a T),
 }
 
-pub unsafe fn load_texture(gl: &glow::Context, data_source: DataSource<'_, [u8]>) -> glow::Texture {
+#[derive(Clone)]
+pub struct Image {
+    pub raw: glow::Texture,
+    pub size: Vec2<u32>,
+}
+
+pub unsafe fn load_image(gl: &glow::Context, data_source: DataSource<'_, [u8]>) -> Image {
     let image = match data_source {
         DataSource::Inline(bytes) => image::load_from_memory(bytes).unwrap(),
         DataSource::Path(_) => panic!(),
+    };
+
+    let size = Vec2::from(image.dimensions());
+
+    Image {
+        raw: load_texture_image(gl, image.to_rgba8()),
+        size,
     }
-    .to_rgba8();
+}
+
+pub unsafe fn load_texture(gl: &glow::Context, data_source: DataSource<'_, [u8]>) -> glow::Texture {
+    load_texture_image(
+        gl,
+        match data_source {
+            DataSource::Inline(bytes) => image::load_from_memory(bytes).unwrap(),
+            DataSource::Path(_) => panic!(),
+        }
+        .to_rgba8(),
+    )
+}
+
+unsafe fn load_texture_image(gl: &glow::Context, image: image::RgbaImage) -> glow::Texture {
     let texture = gl.create_texture().unwrap();
     gl.bind_texture(glow::TEXTURE_2D, Some(texture));
     gl.tex_image_2d(

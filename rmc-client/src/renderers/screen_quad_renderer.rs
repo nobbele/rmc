@@ -1,8 +1,10 @@
+use crate::{shader::create_shader, texture::Image};
+
 use super::face_to_tri;
 use bytemuck::offset_of;
 use glow::HasContext;
 use std::mem;
-use vek::Vec2;
+use vek::{Mat3, Vec2};
 
 #[derive(Debug, Default, Copy, Clone)]
 #[repr(C)]
@@ -15,12 +17,13 @@ unsafe impl bytemuck::Pod for ScreenVertex {}
 unsafe impl bytemuck::Zeroable for ScreenVertex {}
 
 pub struct ScreenQuadRenderer {
-    #[allow(dead_code)]
     vao: glow::VertexArray,
     #[allow(dead_code)]
     vbo: glow::Buffer,
     #[allow(dead_code)]
     ebo: glow::Buffer,
+
+    program: glow::Program,
 }
 
 impl ScreenQuadRenderer {
@@ -76,16 +79,89 @@ impl ScreenQuadRenderer {
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
         gl.buffer_data_u8_slice(
             glow::ELEMENT_ARRAY_BUFFER,
-            bytemuck::cast_slice::<[u8; 6], u8>(&[face_to_tri(&[0, 1, 2, 3])]),
+            bytemuck::cast_slice::<[u8; 6], u8>(&[{
+                let mut indices = face_to_tri(&[0, 1, 2, 3]);
+                indices.reverse();
+                indices
+            }]),
             glow::STATIC_DRAW,
         );
 
-        ScreenQuadRenderer { vao, vbo, ebo }
+        let program = create_shader(
+            &gl,
+            include_str!("../../shaders/screen.vert"),
+            include_str!("../../shaders/screen.frag"),
+        );
+
+        ScreenQuadRenderer {
+            vao,
+            vbo,
+            ebo,
+            program,
+        }
     }
 
-    pub unsafe fn draw(&self, gl: &glow::Context, texture: glow::Texture) {
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+    pub unsafe fn draw(&self, gl: &glow::Context, image: &Image, params: DrawParams) {
+        let screen_to_view_scale = Vec2::one() / Vec2::new(1024.0, 768.0);
+        // TODO improve
+        let screen_mat = Mat3::<f32>::identity()
+            * Mat3::translation_2d(params.position * screen_to_view_scale)
+            * Mat3::scaling_3d(
+                (screen_to_view_scale * image.size.as_::<f32>() * params.scale).with_z(1.0),
+            )
+            * Mat3::translation_2d(-params.origin);
+
+        gl.use_program(Some(self.program));
+        gl.uniform_matrix_3_f32_slice(
+            Some(
+                &gl.get_uniform_location(self.program, "uniform_Mat")
+                    .unwrap(),
+            ),
+            false,
+            screen_mat.as_col_slice(),
+        );
+
+        gl.bind_texture(glow::TEXTURE_2D, Some(image.raw));
         gl.bind_vertex_array(Some(self.vao));
         gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_BYTE, 0);
+    }
+}
+
+// pub enum ScaleOrSize {
+//     Scale(Vec2<f32>),
+//     Size(Vec2<f32>),
+// }
+
+#[derive(Clone, Copy)]
+pub struct DrawParams {
+    pub position: Vec2<f32>,
+    pub origin: Vec2<f32>,
+    pub scale: Vec2<f32>,
+}
+
+impl DrawParams {
+    pub fn scale(mut self, scale: Vec2<f32>) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    pub fn position(mut self, position: Vec2<f32>) -> Self {
+        self.position = position;
+        self
+    }
+
+    pub fn origin(mut self, origin: Vec2<f32>) -> Self {
+        self.origin = origin;
+        self
+    }
+}
+
+impl Default for DrawParams {
+    fn default() -> Self {
+        Self {
+            position: Vec2::zero(),
+            origin: Vec2::zero(),
+            scale: Vec2::one(),
+        }
     }
 }
