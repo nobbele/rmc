@@ -24,7 +24,7 @@ lazy_static! {
 }
 const SPEED: f32 = 4.0;
 
-const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 2.0, 0.2);
+const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 1.8, 0.2);
 const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 
 #[derive(Clone)]
@@ -69,6 +69,52 @@ impl Game {
             }
         }
 
+        for z in 0..15 {
+            for x in 0..15 {
+                world.set_block(
+                    Vec3::new(-1 * CHUNK_SIZE as i32 + x, 19, -1 * CHUNK_SIZE as i32 + z).as_(),
+                    Block::WOOD,
+                );
+            }
+        }
+
+        for x in 0..15 {
+            for y in 0..6 {
+                world.set_block(
+                    Vec3::new(
+                        -1 * CHUNK_SIZE as i32 + x,
+                        y + 14,
+                        -1 * CHUNK_SIZE as i32 + 0,
+                    )
+                    .as_(),
+                    Block::WOOD,
+                );
+            }
+        }
+
+        for x in 0..15 {
+            for y in 0..6 {
+                world.set_block(
+                    Vec3::new(-1 * CHUNK_SIZE as i32 + x, y + 14, -2).as_(),
+                    Block::WOOD,
+                );
+            }
+        }
+
+        for z in 0..15 {
+            for y in 0..6 {
+                world.set_block(
+                    Vec3::new(
+                        -1 * CHUNK_SIZE as i32 + 0,
+                        y + 14,
+                        -1 * CHUNK_SIZE as i32 + z,
+                    )
+                    .as_(),
+                    Block::WOOD,
+                );
+            }
+        }
+
         let mut game = Game {
             world,
 
@@ -87,6 +133,7 @@ impl Game {
         };
 
         game.set_block(Vec3::new(6, 14, 8), Block::LANTERN);
+        game.set_block(Vec3::new(-8, 14, -8), Block::LANTERN);
 
         game
     }
@@ -118,13 +165,11 @@ impl Game {
     fn handle_movement(&mut self, input: &InputState) {
         let up_down = input.get_key(Keycode::Space).pressed() as i8
             - input.get_key(Keycode::LShift).pressed() as i8;
-        let movement_vector = input.get_movement_vector();
-        self.camera.position += (movement_vector.x * self.camera.right()
-            + movement_vector.y * self.camera.forward())
-        .try_normalized()
-        .unwrap_or_default()
-            * SPEED
-            * TICK_DELTA;
+        let input_vector = input.get_movement_vector();
+        let movement_vector =
+            input_vector.x * self.camera.right() + input_vector.y * self.camera.forward();
+        self.camera.position +=
+            movement_vector.try_normalized().unwrap_or_default() * SPEED * TICK_DELTA;
 
         if self.on_ground {
             self.velocity.y = up_down as f32 * *JUMP_STRENGTH;
@@ -229,6 +274,10 @@ impl Game {
             let projected_velocity = remaining_velocity - remaining_velocity.dot(normal) * normal;
             self.camera.position += projected_velocity;
 
+            if normal == -Vec3::unit_y() {
+                self.velocity.y = 0.0;
+            }
+
             if normal.y > 0.0 {
                 self.on_ground = true;
             }
@@ -260,17 +309,29 @@ impl Game {
                     continue;
                 }
 
-                let new_block = Block {
-                    light: calculate_block_light(&self.world, position, block, source),
-                    ..block
-                };
+                let mut new_block = block;
 
-                if block != new_block {
+                new_block.open_to_sky =
+                    if let Some(block_above) = self.world.get_block(position + Vec3::unit_y()) {
+                        block_above.ty.light_passing() && block_above.open_to_sky
+                    } else {
+                        // World border, true.
+                        true
+                    };
+
+                new_block.light = calculate_block_light(&self.world, position, new_block, source);
+
+                // Hack: If the source is None (i.e placed by user).
+                // Then always update the neighbors,
+                if block != new_block || source.is_none() {
                     self.dirty_blocks.extend(
                         face_neighbors(position)
                             .into_iter()
-                            .filter(|&p| Some(p) != source)
-                            .map(|p| BlockUpdate { target: p, source }),
+                            // .filter(|&p| Some(p) != source)
+                            .map(|p| BlockUpdate {
+                                target: p,
+                                source: Some(p),
+                            }),
                     );
                     replaces.insert(position, new_block);
                 }

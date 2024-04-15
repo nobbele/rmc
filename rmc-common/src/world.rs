@@ -16,7 +16,7 @@ pub enum BlockType {
     Air,
     Test,
     Grass,
-    #[assoc(light_emission = 255)]
+    #[assoc(light_emission = 224)]
     Lantern,
     #[assoc(light_passing = true)]
     Mesh,
@@ -27,6 +27,7 @@ pub enum BlockType {
 pub struct Block {
     pub ty: BlockType,
     pub light: u8,
+    pub open_to_sky: bool,
 }
 
 impl Block {
@@ -43,29 +44,35 @@ impl Block {
     pub const AIR: Block = Block {
         ty: BlockType::Air,
         light: 0,
+        open_to_sky: false,
     };
     pub const TEST: Block = Block {
         ty: BlockType::Test,
         light: 0,
+        open_to_sky: false,
     };
     pub const GRASS: Block = Block {
         ty: BlockType::Grass,
         light: 0,
+        open_to_sky: false,
     };
     pub const LANTERN: Block = Block {
         ty: BlockType::Lantern,
         light: 0,
+        open_to_sky: false,
     };
 
     // Transparent rendering is hard :(
     pub const MESH: Block = Block {
         ty: BlockType::Mesh,
         light: 0,
+        open_to_sky: false,
     };
 
     pub const WOOD: Block = Block {
         ty: BlockType::Wood,
         light: 0,
+        open_to_sky: false,
     };
 }
 
@@ -87,7 +94,13 @@ impl Chunk {
 impl Default for Chunk {
     fn default() -> Self {
         Chunk {
-            blocks: Rc::new(Array3::default((CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE))),
+            blocks: Rc::new(Array3::from_elem(
+                (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
+                Block {
+                    open_to_sky: true,
+                    ..Block::AIR
+                },
+            )),
         }
     }
 }

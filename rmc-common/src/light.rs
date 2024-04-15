@@ -8,6 +8,10 @@ pub fn calculate_block_light(
     block: Block,
     source: Option<Vec3<i32>>,
 ) -> u8 {
+    if block.ty.light_passing() && block.open_to_sky {
+        return 255;
+    }
+
     if let Some(emission) = block.ty.light_emission() {
         emission
     } else if block.ty.light_passing() {
