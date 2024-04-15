@@ -277,7 +277,7 @@ impl ChunkRenderer {
         }
     }
 
-    pub unsafe fn update_blocks(
+    pub unsafe fn update_data(
         &mut self,
         gl: &glow::Context,
         offset: Vec3<f32>,
@@ -285,10 +285,8 @@ impl ChunkRenderer {
     ) {
         let instances = blocks
             .indexed_iter()
-            .map(|(idx, block)| (idx, block.not_air()))
-            .filter_map(|(pos, block)| {
-                block.map(|b| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), b))
-            })
+            .filter(|(_idx, block)| !block.ty.is_air())
+            .map(|(pos, block)| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), block))
             .map(|(pos, block)| Instance {
                 position: offset + pos.as_(),
                 texture: block.ty as u8 - 1,
@@ -303,6 +301,12 @@ impl ChunkRenderer {
             glow::STATIC_DRAW,
         );
         self.ib_size = instances.len();
+    }
+
+    pub unsafe fn clear_data(&mut self, gl: &glow::Context) {
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ib));
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &[], glow::STATIC_DRAW);
+        self.ib_size = 0;
     }
 
     pub unsafe fn draw(&self, gl: &glow::Context) {

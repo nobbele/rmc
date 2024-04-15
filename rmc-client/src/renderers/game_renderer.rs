@@ -66,11 +66,15 @@ impl GameRenderer {
         chunk_coord: Vec3<i32>,
         chunk: &Chunk,
     ) {
-        self.chunk_renderers[idx].update_blocks(
+        self.chunk_renderers[idx].update_data(
             gl,
             chunk_coord.as_() * CHUNK_SIZE as f32,
             chunk.blocks.view(),
-        )
+        );
+    }
+
+    pub unsafe fn clear_chunk(&mut self, gl: &glow::Context, idx: (usize, usize, usize)) {
+        self.chunk_renderers[idx].clear_data(gl);
     }
 
     pub unsafe fn draw(&self, gl: &glow::Context, game: &Game) {

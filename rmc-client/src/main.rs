@@ -86,11 +86,7 @@ fn main() {
         for (pos, chunk) in game.curr.world.chunks_iter() {
             game_renderer.update_chunk(
                 &gl,
-                game.curr
-                    .world
-                    .chunk_index(pos * CHUNK_SIZE as i32)
-                    .unwrap()
-                    .into_tuple(),
+                game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
                 pos,
                 &chunk,
             );
@@ -202,32 +198,42 @@ fn main() {
 
                 input_state.mouse_delta = Vec2::zero();
 
-                for (pos, chunk) in game.curr.world.chunks_iter() {
-                    if game
-                        .prev
-                        .world
-                        .chunk_at(pos * CHUNK_SIZE as i32)
-                        .unwrap()
-                        .blocks
-                        .view()
-                        != game
-                            .curr
-                            .world
-                            .chunk_at(pos * CHUNK_SIZE as i32)
-                            .unwrap()
-                            .blocks
-                            .view()
-                    {
+                if game.curr.world.origin() != game.prev.world.origin() {
+                    for (pos, _chunk) in game.prev.world.chunks_iter() {
+                        game_renderer.clear_chunk(
+                            &gl,
+                            game.prev.world.chunk_to_index(pos).unwrap().into_tuple(),
+                        );
+                    }
+
+                    for (pos, chunk) in game.curr.world.chunks_iter() {
                         game_renderer.update_chunk(
                             &gl,
-                            game.curr
-                                .world
-                                .chunk_index(pos * CHUNK_SIZE as i32)
-                                .unwrap()
-                                .into_tuple(),
+                            game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
                             pos,
                             &chunk,
                         );
+                    }
+                } else {
+                    for (pos, chunk) in game.curr.world.chunks_iter() {
+                        if game
+                            .prev
+                            .world
+                            .chunk_at_world(pos * CHUNK_SIZE as i32)
+                            .map(|c| c.blocks)
+                            != game
+                                .curr
+                                .world
+                                .chunk_at_world(pos * CHUNK_SIZE as i32)
+                                .map(|c| c.blocks)
+                        {
+                            game_renderer.update_chunk(
+                                &gl,
+                                game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
+                                pos,
+                                &chunk,
+                            );
+                        }
                     }
                 }
 
@@ -251,13 +257,15 @@ fn main() {
                         game.curr.dirty_blocks.len()
                     ));
                     ui.text(format!("Position: {:.2}", game.curr.camera.position));
+                    ui.text(format!("Block Position: {}", game.curr.block_coordinate()));
                     ui.text(format!(
-                        "Block Position: {:.2}",
-                        game.curr.block_coordinate()
-                    ));
-                    ui.text(format!(
-                        "Chunk Position: {:.2}",
-                        game.curr.chunk_coordinate()
+                        "Chunk Position: {} ({:?}) (loaded: {})",
+                        game.curr.chunk_coordinate(),
+                        game.curr.world.chunk_to_index(game.curr.chunk_coordinate()),
+                        game.curr
+                            .world
+                            .chunk_at_world(game.curr.block_coordinate())
+                            .is_some()
                     ));
                     ui.text(format!(
                         "Highlight: {:?} ({:?}) (light: {})",

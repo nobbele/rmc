@@ -5,9 +5,11 @@ use crate::DiscreteBlend;
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone, Assoc)]
 #[func(pub fn light_emission(&self) -> Option<u8>)]
 #[func(pub fn light_passing(&self) -> bool { false })]
+#[func(pub fn is_air(&self) -> bool { false })]
 pub enum BlockType {
     #[default]
     #[assoc(light_passing = true)]
+    #[assoc(is_air = true)]
     Air,
     Test,
     Grass,
@@ -26,49 +28,21 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn not_air(self) -> Option<Block> {
-        if self.ty == BlockType::Air {
-            return None;
+    pub const fn new(ty: BlockType) -> Self {
+        Block {
+            ty,
+            light: 0,
+            open_to_sky: false,
         }
-
-        Some(self)
     }
-}
 
-impl Block {
-    pub const AIR: Block = Block {
-        ty: BlockType::Air,
-        light: 0,
-        open_to_sky: false,
-    };
-    pub const TEST: Block = Block {
-        ty: BlockType::Test,
-        light: 0,
-        open_to_sky: false,
-    };
-    pub const GRASS: Block = Block {
-        ty: BlockType::Grass,
-        light: 0,
-        open_to_sky: false,
-    };
-    pub const LANTERN: Block = Block {
-        ty: BlockType::Lantern,
-        light: 0,
-        open_to_sky: false,
-    };
-
+    pub const AIR: Block = Block::new(BlockType::Air);
+    pub const TEST: Block = Block::new(BlockType::Test);
+    pub const GRASS: Block = Block::new(BlockType::Grass);
+    pub const LANTERN: Block = Block::new(BlockType::Lantern);
     // Transparent rendering is hard :(
-    pub const MESH: Block = Block {
-        ty: BlockType::Mesh,
-        light: 0,
-        open_to_sky: false,
-    };
-
-    pub const WOOD: Block = Block {
-        ty: BlockType::Wood,
-        light: 0,
-        open_to_sky: false,
-    };
+    // pub const MESH: Block = Block::new(BlockType::Mesh);
+    pub const WOOD: Block = Block::new(BlockType::Wood);
 }
 
 impl DiscreteBlend for Block {}

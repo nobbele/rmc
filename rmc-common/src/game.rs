@@ -4,7 +4,7 @@ use crate::{
     input::InputState,
     light::calculate_block_light,
     raycast::{raycast, RaycastOutput},
-    world::{face_neighbors, World, CHUNK_SIZE},
+    world::{face_neighbors, Chunk, World, CHUNK_SIZE},
     Blend, Block, BlockType, Camera,
 };
 use itertools::Itertools;
@@ -49,25 +49,24 @@ pub struct Game {
     pub block_update_count: usize,
 }
 
+fn initialize_chunk(world: &mut World, chunk: Vec3<i32>) {
+    for y in 0..14 {
+        for z in 0..16 {
+            for x in 0..16 {
+                world.set_block(
+                    chunk * CHUNK_SIZE as i32 + Vec3::new(x, y, z).as_(),
+                    Block::GRASS,
+                );
+            }
+        }
+    }
+}
+
 impl Game {
     pub fn new() -> Self {
         let mut world = World::new(Vec3::zero());
         for (chunk_x, chunk_z) in (-1_i32..=1).cartesian_product(-1_i32..=1) {
-            for y in 0..14 {
-                for z in 0..16 {
-                    for x in 0..16 {
-                        world.set_block(
-                            Vec3::new(
-                                chunk_x * CHUNK_SIZE as i32 + x,
-                                y,
-                                chunk_z * CHUNK_SIZE as i32 + z,
-                            )
-                            .as_(),
-                            Block::GRASS,
-                        );
-                    }
-                }
-            }
+            initialize_chunk(&mut world, Vec3::new(chunk_x, 0, chunk_z));
         }
 
         for z in 0..15 {
@@ -156,6 +155,50 @@ impl Game {
 
         self.handle_place_destroy(input);
         self.update_blocks();
+
+        if self.chunk_coordinate() != initial.chunk_coordinate() {
+            self.world.set_origin(self.chunk_coordinate());
+
+            let unloaded_chunks = self
+                .world
+                .chunks
+                .indexed_iter()
+                .filter_map(|(idx, chunk)| {
+                    if chunk.is_none() {
+                        Some(self.world.index_to_chunk(Vec3::<usize>::from(idx)))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+
+            for chunk_coordinate in unloaded_chunks {
+                self.world.load(chunk_coordinate, Chunk::default());
+
+                if chunk_coordinate.y == 0 {
+                    initialize_chunk(&mut self.world, chunk_coordinate);
+                }
+
+                // TODO do this in a parallel thread to not be super slow?
+                // for (idx, _block) in self
+                //     .world
+                //     .chunk_at(chunk_coordinate)
+                //     .unwrap()
+                //     .blocks
+                //     .indexed_iter()
+                // {
+                //     let local_coord = Vec3::<usize>::from(idx).as_();
+                //     // Only update the borders
+                //     if local_coord.into_iter().any(|e| e == 0 || e == 15) {
+                //         let world_coord = chunk_coordinate * CHUNK_SIZE as i32 + local_coord;
+                //         self.dirty_blocks.push_back(BlockUpdate {
+                //             target: world_coord,
+                //             source: None,
+                //         });
+                //     }
+                // }
+            }
+        }
     }
 
     fn handle_camera_movement(&mut self, input: &InputState) {
@@ -384,7 +427,7 @@ impl Game {
     }
 
     pub fn chunk_coordinate(&self) -> Vec3<i32> {
-        self.world.block_to_chunk(self.block_coordinate())
+        self.world.world_to_chunk(self.block_coordinate())
     }
 }
 
