@@ -1,8 +1,9 @@
 use crate::{
     camera::Angle,
     input::InputState,
+    light::calculate_block_light,
     physics::{sweep_test, SweepBox, SweepTestResult},
-    world::{face_to_normal, raycast, Block, BlockType, RaycastOutput, World, CHUNK_SIZE},
+    world::{face_neighbors, raycast, Block, BlockType, RaycastOutput, World, CHUNK_SIZE},
     Blend, Camera,
 };
 use itertools::Itertools;
@@ -235,7 +236,7 @@ impl Game {
     }
 
     fn update_blocks(&mut self) {
-        const MAX_UPDATES_COUNT: usize = 512;
+        const MAX_UPDATES_COUNT: usize = 8192;
 
         self.block_update_count = 0;
 
@@ -259,71 +260,17 @@ impl Game {
                     continue;
                 }
 
-                const INCLUDE_DIAGONAL: bool = true;
-
-                let neighbor_positions =
-                    [0, 1, 2, 3, 4, 5].map(|face| position + face_to_normal(face));
-                let neighbors = if INCLUDE_DIAGONAL {
-                    neighbor_positions
-                        .into_iter()
-                        .chain(
-                            [
-                                Vec3::new(1, 1, 1),
-                                Vec3::new(1, 1, -1),
-                                Vec3::new(1, -1, 1),
-                                Vec3::new(1, -1, -1),
-                                Vec3::new(-1, 1, 1),
-                                Vec3::new(-1, 1, -1),
-                                Vec3::new(-1, -1, 1),
-                                Vec3::new(-1, -1, -1),
-                            ]
-                            .into_iter()
-                            .map(|o| position + o),
-                        )
-                        .map(|position| (position, self.world.get_block(position)))
-                        .collect_vec()
-                } else {
-                    neighbor_positions
-                        .map(|position| (position, self.world.get_block(position)))
-                        .to_vec()
+                let new_block = Block {
+                    light: calculate_block_light(&self.world, position, block, source),
+                    ..block
                 };
-
-                let light = if let Some(emission) = block.ty.light_emission() {
-                    emission
-                } else if block.ty.light_passing() {
-                    neighbors
-                        .iter()
-                        .map(|&(p, b)| {
-                            b.map(|b| {
-                                let distance = position.as_::<f32>().distance(p.as_::<f32>());
-                                assert!(distance <= 2.0);
-                                let new_light =
-                                    b.light.checked_sub((16.0 * distance) as u8).unwrap_or(0);
-                                if new_light < block.light && Some(p) == source {
-                                    return 0;
-                                }
-
-                                new_light
-                            })
-                            .unwrap_or(0)
-                        })
-                        .max()
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
-
-                let new_block = Block { light, ..block };
 
                 if block != new_block {
                     self.dirty_blocks.extend(
-                        neighbors
+                        face_neighbors(position)
                             .into_iter()
-                            .filter(|&(p, _b)| Some(p) != source)
-                            .map(|(p, _b)| BlockUpdate {
-                                target: p,
-                                source: Some(position), // Propogate source?
-                            }),
+                            .filter(|&p| Some(p) != source)
+                            .map(|p| BlockUpdate { target: p, source }),
                     );
                     replaces.insert(position, new_block);
                 }

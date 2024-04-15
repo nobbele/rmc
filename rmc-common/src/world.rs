@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, rc::Rc};
 
 use enum_assoc::Assoc;
+use itertools::Itertools;
 use ndarray::Array3;
 use vek::Vec3;
 
@@ -318,6 +319,32 @@ pub fn face_to_normal(face: u8) -> Vec3<i32> {
         5 => -Vec3::unit_z(),
         _ => unreachable!(),
     }
+}
+
+pub fn face_neighbors(position: Vec3<i32>) -> [Vec3<i32>; 6] {
+    [0, 1, 2, 3, 4, 5].map(|face| position + face_to_normal(face))
+}
+
+pub fn surrounding_neighbors(position: Vec3<i32>) -> [Vec3<i32>; 6 + 8] {
+    face_neighbors(position)
+        .into_iter()
+        .chain(
+            [
+                Vec3::new(1, 1, 1),
+                Vec3::new(1, 1, -1),
+                Vec3::new(1, -1, 1),
+                Vec3::new(1, -1, -1),
+                Vec3::new(-1, 1, 1),
+                Vec3::new(-1, 1, -1),
+                Vec3::new(-1, -1, 1),
+                Vec3::new(-1, -1, -1),
+            ]
+            .into_iter()
+            .map(|o| position + o),
+        )
+        .collect_vec()
+        .try_into()
+        .unwrap()
 }
 
 #[cfg(test)]

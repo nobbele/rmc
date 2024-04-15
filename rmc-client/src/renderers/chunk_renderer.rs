@@ -3,7 +3,7 @@ use std::mem;
 use bytemuck::offset_of;
 use glow::HasContext;
 use ndarray::ArrayView3;
-use rmc_common::world::{face_to_normal, Block};
+use rmc_common::world::{face_neighbors, Block};
 use vek::{Vec2, Vec3};
 
 /*
@@ -292,8 +292,7 @@ impl ChunkRenderer {
             .map(|(pos, block)| Instance {
                 position: offset + pos.as_(),
                 texture: block.ty as u8 - 1,
-                light: [0, 1, 2, 3, 4, 5]
-                    .map(|face| get_block_light(blocks, pos + face_to_normal(face))),
+                light: face_neighbors(pos).map(|p| get_block_light(blocks, p)),
             })
             .collect::<Vec<_>>();
 
