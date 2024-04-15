@@ -6,10 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ndarray = "0.15.6"
-vek = "0.16.1"
-lazy_static = "1.4.0"
-itertools = "0.12.1"
+ndarray = "0.15"
+vek = "0.16"
+lazy_static = "1.4"
+itertools = "0.12"
+enum-assoc = "1.1"
 
 # inline_tweak = "1.1.1"
 

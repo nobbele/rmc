@@ -2,7 +2,7 @@ use crate::{
     camera::Angle,
     input::InputState,
     physics::{sweep_test, SweepBox, SweepTestResult},
-    world::{face_to_normal, raycast, Block, RaycastOutput, World, CHUNK_SIZE},
+    world::{face_to_normal, raycast, Block, BlockType, RaycastOutput, World, CHUNK_SIZE},
     Blend, Camera,
 };
 use itertools::Itertools;
@@ -27,6 +27,12 @@ const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 2.0, 0.2);
 const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 
 #[derive(Clone)]
+pub struct BlockUpdate {
+    pub target: Vec3<i32>,
+    pub source: Option<Vec3<i32>>,
+}
+
+#[derive(Clone)]
 pub struct Game {
     pub world: World,
 
@@ -36,7 +42,7 @@ pub struct Game {
     pub on_ground: bool,
     pub look_at_raycast: Option<RaycastOutput>,
 
-    pub dirty_blocks: VecDeque<Vec3<i32>>,
+    pub dirty_blocks: VecDeque<BlockUpdate>,
     // This is per frame
     pub block_update_count: usize,
 }
@@ -179,7 +185,16 @@ impl Game {
                         .collect_vec()
                         .into_iter()
                 })
-                .map(|(pos, block)| (pos, if block.id == 0 { None } else { Some(block) }))
+                .map(|(pos, block)| {
+                    (
+                        pos,
+                        if block.ty == BlockType::Air {
+                            None
+                        } else {
+                            Some(block)
+                        },
+                    )
+                })
                 .filter_map(|(pos, block)| block.map(|b| (pos, b)))
                 // WTF How does this improve the collision detection???
                 .collect_vec()
@@ -220,7 +235,7 @@ impl Game {
     }
 
     fn update_blocks(&mut self) {
-        const MAX_UPDATES_COUNT: usize = 4096;
+        const MAX_UPDATES_COUNT: usize = 512;
 
         self.block_update_count = 0;
 
@@ -231,7 +246,11 @@ impl Game {
             let dirty_blocks = self.dirty_blocks.drain(..update_count).collect_vec();
 
             let mut replaces = HashMap::new();
-            for position in dirty_blocks {
+            for BlockUpdate {
+                target: position,
+                source,
+            } in dirty_blocks
+            {
                 let Some(block) = self.world.get_block(position) else {
                     continue;
                 };
@@ -269,29 +288,43 @@ impl Game {
                         .to_vec()
                 };
 
-                let light = match () {
-                    _ if block.id == Block::LANTERN.id => 255,
-                    _ if block.id == Block::AIR.id || block.id == Block::MESH.id => neighbors
+                let light = if let Some(emission) = block.ty.light_emission() {
+                    emission
+                } else if block.ty.light_passing() {
+                    neighbors
                         .iter()
                         .map(|&(p, b)| {
                             b.map(|b| {
                                 let distance = position.as_::<f32>().distance(p.as_::<f32>());
                                 assert!(distance <= 2.0);
-                                b.light.checked_sub((16.0 * distance) as u8)
+                                let new_light =
+                                    b.light.checked_sub((16.0 * distance) as u8).unwrap_or(0);
+                                if new_light < block.light && Some(p) == source {
+                                    return 0;
+                                }
+
+                                new_light
                             })
-                            .flatten()
                             .unwrap_or(0)
                         })
                         .max()
-                        .unwrap_or(0),
-                    _ => 0,
+                        .unwrap_or(0)
+                } else {
+                    0
                 };
 
                 let new_block = Block { light, ..block };
 
                 if block != new_block {
-                    self.dirty_blocks
-                        .extend(neighbors.into_iter().map(|(p, _b)| p));
+                    self.dirty_blocks.extend(
+                        neighbors
+                            .into_iter()
+                            .filter(|&(p, _b)| Some(p) != source)
+                            .map(|(p, _b)| BlockUpdate {
+                                target: p,
+                                source: Some(position), // Propogate source?
+                            }),
+                    );
                     replaces.insert(position, new_block);
                 }
             }
@@ -309,7 +342,10 @@ impl Game {
     pub fn set_block1(&mut self, position: Vec3<i32>, block: Block, update: bool) {
         self.world.set_block(position, block);
         if update {
-            self.dirty_blocks.push_back(position);
+            self.dirty_blocks.push_back(BlockUpdate {
+                target: position,
+                source: None,
+            });
         }
     }
 

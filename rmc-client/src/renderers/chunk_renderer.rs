@@ -285,13 +285,13 @@ impl ChunkRenderer {
     ) {
         let instances = blocks
             .indexed_iter()
-            .map(|(idx, block)| (idx, if block.id == 0 { None } else { Some(block) }))
+            .map(|(idx, block)| (idx, block.not_air()))
             .filter_map(|(pos, block)| {
                 block.map(|b| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), b))
             })
             .map(|(pos, block)| Instance {
                 position: offset + pos.as_(),
-                texture: block.id - 1,
+                texture: block.ty as u8 - 1,
                 light: [0, 1, 2, 3, 4, 5]
                     .map(|face| get_block_light(blocks, pos + face_to_normal(face))),
             })

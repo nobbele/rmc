@@ -1,26 +1,71 @@
 use std::{cmp::Ordering, rc::Rc};
 
+use enum_assoc::Assoc;
 use ndarray::Array3;
 use vek::Vec3;
 
 use crate::DiscreteBlend;
 
+#[derive(Debug, Default, PartialEq, Eq, Copy, Clone, Assoc)]
+#[func(pub fn light_emission(&self) -> Option<u8>)]
+#[func(pub fn light_passing(&self) -> bool { false })]
+pub enum BlockType {
+    #[default]
+    #[assoc(light_passing = true)]
+    Air,
+    Test,
+    Grass,
+    #[assoc(light_emission = 255)]
+    Lantern,
+    #[assoc(light_passing = true)]
+    Mesh,
+    Wood,
+}
+
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
 pub struct Block {
-    pub id: u8,
+    pub ty: BlockType,
     pub light: u8,
 }
 
 impl Block {
-    pub const AIR: Block = Block { id: 0, light: 0 };
-    pub const TEST: Block = Block { id: 1, light: 0 };
-    pub const GRASS: Block = Block { id: 2, light: 0 };
-    pub const LANTERN: Block = Block { id: 3, light: 0 };
+    pub fn not_air(self) -> Option<Block> {
+        if self.ty == BlockType::Air {
+            return None;
+        }
+
+        Some(self)
+    }
+}
+
+impl Block {
+    pub const AIR: Block = Block {
+        ty: BlockType::Air,
+        light: 0,
+    };
+    pub const TEST: Block = Block {
+        ty: BlockType::Test,
+        light: 0,
+    };
+    pub const GRASS: Block = Block {
+        ty: BlockType::Grass,
+        light: 0,
+    };
+    pub const LANTERN: Block = Block {
+        ty: BlockType::Lantern,
+        light: 0,
+    };
 
     // Transparent rendering is hard :(
-    pub const MESH: Block = Block { id: 4, light: 0 };
+    pub const MESH: Block = Block {
+        ty: BlockType::Mesh,
+        light: 0,
+    };
 
-    pub const WOOD: Block = Block { id: 5, light: 0 };
+    pub const WOOD: Block = Block {
+        ty: BlockType::Wood,
+        light: 0,
+    };
 }
 
 impl DiscreteBlend for Block {}
@@ -257,18 +302,20 @@ pub fn raycast(
     get_block: impl Fn(Vec3<i32>) -> Option<Block>,
 ) -> Option<RaycastOutput> {
     raycast_generalized(pos, dir, radius, 1.0, |grid_pos| {
-        matches!(get_block(grid_pos), Some(Block { id: 1.., .. }))
+        get_block(grid_pos)
+            .map(|b| b.ty != BlockType::Air)
+            .unwrap_or(false)
     })
 }
 
 pub fn face_to_normal(face: u8) -> Vec3<i32> {
     match face {
-        0 => Vec3::new(1, 0, 0),
-        1 => Vec3::new(0, 1, 0),
-        2 => Vec3::new(0, 0, 1),
-        3 => Vec3::new(-1, 0, 0),
-        4 => Vec3::new(0, -1, 0),
-        5 => Vec3::new(0, 0, -1),
+        0 => Vec3::unit_x(),
+        1 => Vec3::unit_y(),
+        2 => Vec3::unit_z(),
+        3 => -Vec3::unit_x(),
+        4 => -Vec3::unit_y(),
+        5 => -Vec3::unit_z(),
         _ => unreachable!(),
     }
 }
