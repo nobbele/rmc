@@ -101,6 +101,7 @@ impl ScreenQuadRenderer {
         }
     }
 
+    // TODO Instancing
     pub unsafe fn draw(&self, gl: &glow::Context, image: &Image, params: DrawParams) {
         let screen_to_view_scale = Vec2::one() / Vec2::new(1024.0, 768.0);
         // TODO improve
