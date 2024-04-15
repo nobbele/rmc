@@ -92,21 +92,6 @@ impl Default for Chunk {
     }
 }
 
-// trait ChebyshevDistance {
-//     type Output;
-//     fn chebyshev_distance(self, other: Self) -> Self::Output;
-// }
-
-// impl ChebyshevDistance for Vec3<i32> {
-//     type Output = u32;
-//     fn chebyshev_distance(self, other: Vec3<i32>) -> u32 {
-//         self.x
-//             .abs_diff(other.x)
-//             .max(self.y.abs_diff(other.y))
-//             .max(self.z.abs_diff(other.z))
-//     }
-// }
-
 #[derive(Clone)]
 pub struct World {
     pub origin: Vec3<i32>,
@@ -126,8 +111,12 @@ impl World {
         }
     }
 
+    pub fn block_to_chunk(&self, position: Vec3<i32>) -> Vec3<i32> {
+        position.map(|e| (e as f32 / CHUNK_SIZE as f32).floor() as i32)
+    }
+
     pub fn chunk_index(&self, position: Vec3<i32>) -> Option<Vec3<usize>> {
-        let chunk_coord = position.map(|e| (e as f32 / CHUNK_SIZE as f32).floor() as i32);
+        let chunk_coord = self.block_to_chunk(position);
         let offset = chunk_coord - self.origin;
 
         if offset.zip(self.extents).into_iter().any(|(o, e)| o > e) {
@@ -173,10 +162,6 @@ impl World {
                 chunk.clone(),
             )
         })
-        // std::iter::once(((Vec3::zero()), self.chunks[(1, 1, 1)].clone())).chain(std::iter::once((
-        //     (Vec3::new(1, 0, 0)),
-        //     self.chunks[(2, 1, 1)].clone(),
-        // )))
     }
 }
 
@@ -515,18 +500,6 @@ mod tests {
                 -yaw.cos() * pitch.cos(),
             )
         }
-
-        // let Some(output) = raycast(
-        //     Vec3::new(8.0, 18.0, 8.0),
-        //     look_at(2.3, 1.2),
-        //     16.0,
-        //     blocks.view(),
-        // ) else {
-        //     panic!("Raycast was none");
-        // };
-
-        // assert_eq!(output.position, Vec3::new(8, 15, 8));
-        // assert_eq!(output.face, Vec3::new(0, 1, 0));
 
         let Some(output) = raycast(
             Vec3::new(8.0, 18.0, 8.0),

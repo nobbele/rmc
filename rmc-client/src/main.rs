@@ -252,6 +252,14 @@ fn main() {
                     ));
                     ui.text(format!("Position: {:.2}", game.curr.camera.position));
                     ui.text(format!(
+                        "Block Position: {:.2}",
+                        game.curr.block_coordinate()
+                    ));
+                    ui.text(format!(
+                        "Chunk Position: {:.2}",
+                        game.curr.chunk_coordinate()
+                    ));
+                    ui.text(format!(
                         "Highlight: {:?} ({:?}) (light: {})",
                         game.curr
                             .look_at_raycast

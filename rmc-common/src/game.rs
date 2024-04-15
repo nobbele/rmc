@@ -315,6 +315,14 @@ impl Game {
             }
         }
     }
+
+    pub fn block_coordinate(&self) -> Vec3<i32> {
+        self.camera.position.map(|e| e.floor() as i32)
+    }
+
+    pub fn chunk_coordinate(&self) -> Vec3<i32> {
+        self.world.block_to_chunk(self.block_coordinate())
+    }
 }
 
 impl Blend for Game {
