@@ -38,14 +38,14 @@ pub struct BlockUpdate {
 pub enum Item {}
 
 #[derive(Clone, Copy)]
-pub enum ItemOrBlock {
+pub enum BlockOrItem {
     Item(Item),
     Block(BlockType),
 }
 
 #[derive(Clone, Copy)]
 pub struct Hotbar {
-    pub slots: [Option<ItemOrBlock>; 9],
+    pub slots: [Option<BlockOrItem>; 9],
     pub active: usize,
 }
 
@@ -164,7 +164,8 @@ impl Game {
 
         game.set_block(Vec3::new(6, 14, 8), Block::LANTERN);
         game.set_block(Vec3::new(-8, 14, -8), Block::LANTERN);
-        game.hotbar.slots[0] = Some(ItemOrBlock::Block(BlockType::Wood));
+        game.hotbar.slots[0] = Some(BlockOrItem::Block(BlockType::Wood));
+        game.hotbar.slots[1] = Some(BlockOrItem::Block(BlockType::Lantern));
 
         game
     }
@@ -442,7 +443,7 @@ impl Game {
             if input.get_mouse_button(MouseButton::Right).just_pressed() {
                 let position = highlighted.position + highlighted.normal.numcast().unwrap();
 
-                if let Some(ItemOrBlock::Block(block_ty)) = self.hotbar.slots[self.hotbar.active] {
+                if let Some(BlockOrItem::Block(block_ty)) = self.hotbar.slots[self.hotbar.active] {
                     self.set_block(position, Block::new(block_ty));
                 }
             }

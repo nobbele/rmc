@@ -4,6 +4,9 @@ pub use chunk_renderer::ChunkRenderer;
 pub mod screen_quad_renderer;
 pub use screen_quad_renderer::ScreenQuadRenderer;
 
+pub mod isometric_block_renderer;
+pub use isometric_block_renderer::IsometricBlockRenderer;
+
 pub mod game_renderer;
 pub use game_renderer::GameRenderer;
 

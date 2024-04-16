@@ -1,7 +1,8 @@
+#![feature(more_float_constants)]
 use glow::HasContext;
-use renderers::{screen_quad_renderer::DrawParams, ScreenQuadRenderer};
+use renderers::{screen_quad_renderer::DrawParams, IsometricBlockRenderer, ScreenQuadRenderer};
 use rmc_common::{
-    game::{TICK_DELTA, TICK_SPEED},
+    game::{BlockOrItem, TICK_DELTA, TICK_SPEED},
     input::{ButtonBuffer, ButtonStateEvent, InputState, KeyboardEvent, MouseButtonEvent},
     world::CHUNK_SIZE,
     Blend, Game, LookBack,
@@ -64,8 +65,7 @@ fn main() {
             imgui_glow_renderer::Renderer::initialize(&gl, &mut imgui, &mut imgui_textures, false)
                 .unwrap();
 
-        gl.enable(glow::DEPTH_TEST);
-        gl.enable(glow::CULL_FACE);
+        // gl.enable(glow::CULL_FACE);
         gl.clear_color(0.1, 0.2, 0.3, 1.0);
 
         let crosshair_image = load_image(
@@ -82,6 +82,7 @@ fn main() {
         );
 
         let screen_quad_renderer = ScreenQuadRenderer::new(&gl);
+        let isometric_block_renderer = IsometricBlockRenderer::new(&gl);
 
         let mut game = LookBack::new_identical(Game::new());
 
@@ -343,9 +344,28 @@ fn main() {
                             .position(Vec2::new(x, y))
                             .origin(Vec2::new(0.0, 1.0)),
                     );
-                }
 
-                // TODO isometric render of blocks.
+                    if let Some(block_or_item) = game.curr.hotbar.slots[i as usize] {
+                        if let BlockOrItem::Block(block_ty) = block_or_item {
+                            gl.bind_texture(
+                                glow::TEXTURE_2D_ARRAY,
+                                Some(game_renderer.block_array_texture),
+                            );
+                            isometric_block_renderer.draw(
+                                &gl,
+                                block_ty,
+                                DrawParams::default()
+                                    .scale(scale / 2.5)
+                                    .position(
+                                        Vec2::new(x, y)
+                                            + slot_image.size.as_() * scale / 2.0
+                                                * Vec2::new(1.0, -1.0),
+                                    )
+                                    .origin(Vec2::new(0.5, 0.5)),
+                            );
+                        }
+                    }
+                }
             }
 
             window.gl_swap_window();

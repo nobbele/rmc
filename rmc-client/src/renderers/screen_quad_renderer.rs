@@ -13,17 +13,23 @@ pub struct ScreenVertex {
     pub uv: Vec2<f32>,
 }
 
+impl ScreenVertex {
+    pub fn new(position: Vec2<f32>, uv: Vec2<f32>) -> Self {
+        ScreenVertex { position, uv }
+    }
+}
+
 unsafe impl bytemuck::Pod for ScreenVertex {}
 unsafe impl bytemuck::Zeroable for ScreenVertex {}
 
 pub struct ScreenQuadRenderer {
-    vao: glow::VertexArray,
+    pub vao: glow::VertexArray,
     #[allow(dead_code)]
-    vbo: glow::Buffer,
+    pub vbo: glow::Buffer,
     #[allow(dead_code)]
-    ebo: glow::Buffer,
+    pub ebo: glow::Buffer,
 
-    program: glow::Program,
+    pub program: glow::Program,
 }
 
 impl ScreenQuadRenderer {

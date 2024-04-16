@@ -18,8 +18,8 @@ pub struct GameRenderer {
 
     pub chunk_renderers: Array3<ChunkRenderer>,
 
-    block_array_texture: glow::Texture,
-    program: glow::Program,
+    pub block_array_texture: glow::Texture,
+    pub program: glow::Program,
 }
 
 impl GameRenderer {
@@ -70,6 +70,8 @@ impl GameRenderer {
     }
 
     pub unsafe fn draw(&self, gl: &glow::Context, game: &Game) {
+        gl.enable(glow::DEPTH_TEST);
+
         let mvp = self.projection * game.camera.to_matrix();
 
         gl.use_program(Some(self.program));
@@ -99,5 +101,7 @@ impl GameRenderer {
         for chunk_renderer in &self.chunk_renderers {
             chunk_renderer.draw(&gl);
         }
+
+        gl.disable(glow::DEPTH_TEST);
     }
 }

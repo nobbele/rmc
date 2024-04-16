@@ -61,14 +61,14 @@ unsafe impl bytemuck::Pod for Instance {}
 unsafe impl bytemuck::Zeroable for Instance {}
 
 pub struct ChunkRenderer {
+    pub vao: glow::VertexArray,
     #[allow(dead_code)]
-    vao: glow::VertexArray,
+    pub vbo: glow::Buffer,
     #[allow(dead_code)]
-    vbo: glow::Buffer,
-    #[allow(dead_code)]
-    ebo: glow::Buffer,
-    ib: glow::Buffer,
-    ib_size: usize,
+    pub ebo: glow::Buffer,
+
+    pub ib: glow::Buffer,
+    pub ib_size: usize,
 }
 
 fn generate_face(normal: Vec3<f32>, texture_origin: Vec2<f32>, face: u8) -> [Vertex; 4] {
