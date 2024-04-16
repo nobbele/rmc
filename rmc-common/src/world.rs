@@ -285,8 +285,6 @@ pub fn generate_chunk(terrain: &TerrainSampler, chunk_coordinate: Vec3<i32>) -> 
         terrain.sample(world_coord)
     });
 
-    dbg!(&height_map);
-
     for ((x, z), &height) in height_map.indexed_iter() {
         let chunk_y = height as i32 / CHUNK_SIZE as i32;
         let local = Vec3::<usize>::new(x, height as usize % CHUNK_SIZE, z).as_::<i32>();

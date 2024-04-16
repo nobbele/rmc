@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(
             raycast(
                 vek::Vec3::new(8.0, 8.0, -0.2),
-                dbg!(vek::Vec3::new(1.0, 2.0, 0.2).normalized()),
+                vek::Vec3::new(1.0, 2.0, 0.2).normalized(),
                 16.0,
                 |pos| if pos.into_iter().all(|e| e >= 0) {
                     blocks.get(pos.as_::<usize>().into_tuple()).cloned()
