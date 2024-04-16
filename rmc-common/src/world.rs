@@ -1,10 +1,10 @@
 use std::{mem, rc::Rc};
 
 use itertools::Itertools;
-use ndarray::Array3;
-use vek::Vec3;
+use ndarray::{Array2, Array3};
+use vek::{Vec2, Vec3};
 
-use crate::{Block, DiscreteBlend};
+use crate::{game::TerrainSampler, Block, DiscreteBlend};
 
 pub const CHUNK_SIZE: usize = 16;
 
@@ -16,6 +16,12 @@ pub struct Chunk {
 impl Chunk {
     pub fn new() -> Self {
         Chunk::default()
+    }
+
+    pub fn set_block(&mut self, local: Vec3<i32>, block: Block) {
+        let mut new_blocks = Rc::unwrap_or_clone(Rc::clone(&self.blocks));
+        new_blocks[local.as_().into_tuple()] = block;
+        self.blocks = Rc::new(new_blocks);
     }
 }
 
@@ -42,18 +48,19 @@ pub struct World {
 
     // Half width to the sides, excluding middle. i.e (chunks.dim() - 1) / 2
     pub extents: Vec3<i32>,
+
+    pub shape: (usize, usize, usize),
 }
 
 impl World {
     pub fn new(origin: Vec3<i32>) -> Self {
-        let extents = Vec3::one();
+        let extents = Vec3::new(2, 2, 2);
+        let shape = (extents * 2 + Vec3::one()).as_().into_tuple();
         World {
-            chunks: Array3::from_shape_simple_fn(
-                (extents * 2 + Vec3::one()).as_().into_tuple(),
-                || Some(Chunk::default()),
-            ),
+            chunks: Array3::default(shape),
             extents,
             origin,
+            shape,
         }
     }
 
@@ -110,6 +117,8 @@ impl World {
                 continue;
             }
 
+            println!("{} -> {}", index, new_index);
+
             chunks[new_index.into_tuple()] = Some(chunk.clone());
         }
 
@@ -164,16 +173,26 @@ impl World {
     }
 
     pub fn set_block(&mut self, position: Vec3<i32>, block: Block) {
-        let chunk = self.chunk_at_world_mut(position).unwrap();
+        let Some(chunk) = self.chunk_at_world_mut(position) else {
+            panic!("{} is not in a loaded chunk", position);
+        };
         let chunk_offset = position.map(|e| (e as i32).rem_euclid(CHUNK_SIZE as i32));
 
-        let mut new_blocks = Rc::unwrap_or_clone(Rc::clone(&chunk.blocks));
-        new_blocks[chunk_offset.as_().into_tuple()] = block;
-        chunk.blocks = Rc::new(new_blocks);
+        chunk.set_block(chunk_offset, block);
     }
 
     pub fn index_to_chunk(&self, index: Vec3<usize>) -> Vec3<i32> {
         index.as_::<i32>() - self.extents + self.origin
+    }
+
+    pub fn unloaded_chunks(&self) -> impl Iterator<Item = Vec3<i32>> + '_ {
+        self.chunks.indexed_iter().filter_map(|(idx, chunk)| {
+            if chunk.is_none() {
+                Some(self.index_to_chunk(Vec3::<usize>::from(idx)))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn chunks_iter(&self) -> impl Iterator<Item = (Vec3<i32>, Chunk)> + '_ {
@@ -251,4 +270,38 @@ pub fn surrounding_neighbors(position: Vec3<i32>) -> [Vec3<i32>; 6 + 8] {
         .collect_vec()
         .try_into()
         .unwrap()
+}
+
+pub fn generate_chunk(terrain: &TerrainSampler, chunk_coordinate: Vec3<i32>) -> Chunk {
+    println!("loading {}..", chunk_coordinate);
+
+    // TODO non-rc'd chunk..
+    let mut chunk = Chunk::new();
+
+    let height_map = Array2::<u32>::from_shape_fn((CHUNK_SIZE, CHUNK_SIZE), |(x, y)| {
+        let local = Vec2::<usize>::new(x, y).as_::<i32>();
+        let world_coord =
+            Vec2::new(chunk_coordinate.x, chunk_coordinate.z) * CHUNK_SIZE as i32 + local;
+        terrain.sample(world_coord)
+    });
+
+    dbg!(&height_map);
+
+    for ((x, z), &height) in height_map.indexed_iter() {
+        let chunk_y = height as i32 / CHUNK_SIZE as i32;
+        let local = Vec3::<usize>::new(x, height as usize % CHUNK_SIZE, z).as_::<i32>();
+
+        if chunk_coordinate.y < chunk_y {
+            for y in 0..16 {
+                chunk.set_block(local.with_y(y), Block::GRASS);
+            }
+        } else if chunk_coordinate.y == chunk_y {
+            for y in 0..local.y {
+                chunk.set_block(local.with_y(y), Block::GRASS);
+            }
+        }
+    }
+
+    println!("done!");
+    chunk
 }

@@ -4,14 +4,15 @@ use crate::{
     input::InputState,
     light::calculate_block_light,
     raycast::{raycast, RaycastOutput},
-    world::{face_neighbors, Chunk, World, CHUNK_SIZE},
+    world::{face_neighbors, generate_chunk, World, CHUNK_SIZE},
     Blend, Block, BlockType, Camera, DiscreteBlend,
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
+use noise::NoiseFn;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
 use std::collections::{HashMap, VecDeque};
-use vek::{Aabb, Extent3, Vec3};
+use vek::{Aabb, Extent3, Vec2, Vec3};
 
 pub const TICK_RATE: u32 = 16;
 pub const TICK_SPEED: f32 = 1.0;
@@ -61,8 +62,44 @@ impl Hotbar {
 impl DiscreteBlend for Hotbar {}
 
 #[derive(Clone)]
+pub struct TerrainSampler {
+    seed: u32,
+}
+
+fn sample(min: u32, max: u32, v: f64) -> u32 {
+    min + (v * (max - min) as f64) as u32
+}
+
+impl TerrainSampler {
+    pub fn new(seed: u32) -> Self {
+        TerrainSampler { seed }
+    }
+
+    pub fn sample(&self, position: Vec2<i32>) -> u32 {
+        let position = position.as_::<f64>();
+        let noise = noise::OpenSimplex::new(self.seed);
+        let noise2 = noise::Fbm::<noise::OpenSimplex>::new(self.seed + 20 / 2);
+
+        const SCALE: f64 = 1.0 / 10.0;
+
+        let base_height = noise.get((position * SCALE).into_array());
+        let height = noise2.get((position * SCALE).into_array()).powf(1.1);
+        let hills = noise2
+            .get((position * SCALE * 0.5).into_array())
+            .powf(1.0 + height);
+
+        sample(14, 18, base_height)
+            + sample(0, 10, (1.0 - base_height) * height)
+            + sample(0, 16, hills)
+    }
+}
+
+impl DiscreteBlend for TerrainSampler {}
+
+#[derive(Clone)]
 pub struct Game {
     pub world: World,
+    pub terrain: TerrainSampler,
 
     pub camera: Camera,
     pub velocity: Vec3<f32>,
@@ -71,30 +108,33 @@ pub struct Game {
     pub look_at_raycast: Option<RaycastOutput>,
 
     pub dirty_blocks: VecDeque<BlockUpdate>,
-    // This is per frame
+    // This is per tick
     pub block_update_count: usize,
 
     pub hotbar: Hotbar,
 }
 
-fn initialize_chunk(world: &mut World, chunk: Vec3<i32>) {
-    for y in 0..14 {
-        for z in 0..16 {
-            for x in 0..16 {
-                world.set_block(
-                    chunk * CHUNK_SIZE as i32 + Vec3::new(x, y, z).as_(),
-                    Block::GRASS,
-                );
-            }
-        }
-    }
-}
+// fn initialize_chunk(world: &mut World, chunk: Vec3<i32>) {
+//     for y in 0..14 {
+//         for z in 0..16 {
+//             for x in 0..16 {
+//                 world.set_block(
+//                     chunk * CHUNK_SIZE as i32 + Vec3::new(x, y, z).as_(),
+//                     Block::GRASS,
+//                 );
+//             }
+//         }
+//     }
+// }
 
 impl Game {
     pub fn new() -> Self {
         let mut world = World::new(Vec3::zero());
-        for (chunk_x, chunk_z) in (-1_i32..=1).cartesian_product(-1_i32..=1) {
-            initialize_chunk(&mut world, Vec3::new(chunk_x, 0, chunk_z));
+        let terrain = TerrainSampler::new(54327);
+
+        let unloaded_chunks = world.unloaded_chunks().collect_vec();
+        for chunk_coord in unloaded_chunks {
+            world.load(chunk_coord, generate_chunk(&terrain, chunk_coord));
         }
 
         for z in 0..15 {
@@ -144,6 +184,7 @@ impl Game {
         }
 
         let mut game = Game {
+            terrain,
             world,
 
             camera: Camera {
@@ -176,7 +217,7 @@ impl Game {
         self.handle_camera_movement(input);
         self.handle_movement(input);
 
-        self.velocity.y -= GRAVITY * TICK_DELTA;
+        // self.velocity.y -= GRAVITY * TICK_DELTA;
         self.camera.position += self.velocity * TICK_DELTA;
 
         self.handle_collision(&initial);
@@ -191,47 +232,21 @@ impl Game {
         self.handle_place_destroy(input);
         self.update_blocks();
 
-        if self.chunk_coordinate() != initial.chunk_coordinate() {
+        if self
+            .chunk_coordinate()
+            .as_::<f32>()
+            .distance(self.world.origin().as_::<f32>())
+            >= 2.0
+        {
             self.world.set_origin(self.chunk_coordinate());
 
-            let unloaded_chunks = self
-                .world
-                .chunks
-                .indexed_iter()
-                .filter_map(|(idx, chunk)| {
-                    if chunk.is_none() {
-                        Some(self.world.index_to_chunk(Vec3::<usize>::from(idx)))
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec();
+            let unloaded_chunks = self.world.unloaded_chunks().collect_vec();
 
             for chunk_coordinate in unloaded_chunks {
-                self.world.load(chunk_coordinate, Chunk::default());
-
-                if chunk_coordinate.y == 0 {
-                    initialize_chunk(&mut self.world, chunk_coordinate);
-                }
-
-                // TODO do this in a parallel thread to not be super slow?
-                // for (idx, _block) in self
-                //     .world
-                //     .chunk_at(chunk_coordinate)
-                //     .unwrap()
-                //     .blocks
-                //     .indexed_iter()
-                // {
-                //     let local_coord = Vec3::<usize>::from(idx).as_();
-                //     // Only update the borders
-                //     if local_coord.into_iter().any(|e| e == 0 || e == 15) {
-                //         let world_coord = chunk_coordinate * CHUNK_SIZE as i32 + local_coord;
-                //         self.dirty_blocks.push_back(BlockUpdate {
-                //             target: world_coord,
-                //             source: None,
-                //         });
-                //     }
-                // }
+                self.world.load(
+                    chunk_coordinate,
+                    generate_chunk(&self.terrain, chunk_coordinate),
+                );
             }
         }
     }
@@ -472,6 +487,7 @@ impl Blend for Game {
     fn blend(&self, other: &Game, alpha: f32) -> Self {
         Self {
             world: self.world.blend(&other.world, alpha),
+            terrain: self.terrain.blend(&other.terrain, alpha),
 
             camera: self.camera.blend(&other.camera, alpha),
             velocity: self.velocity.blend(&other.velocity, alpha),

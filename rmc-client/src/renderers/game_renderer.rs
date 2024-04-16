@@ -23,7 +23,7 @@ pub struct GameRenderer {
 }
 
 impl GameRenderer {
-    pub unsafe fn new(gl: &glow::Context) -> Self {
+    pub unsafe fn new(gl: &glow::Context, chunk_shape: (usize, usize, usize)) -> Self {
         let block_array_texture = load_array_texture(
             &gl,
             &[
@@ -44,7 +44,7 @@ impl GameRenderer {
         GameRenderer {
             projection: Mat4::<f32>::infinite_perspective_rh(120_f32.to_radians(), 4. / 3., 0.0001),
 
-            chunk_renderers: Array3::from_shape_simple_fn((3, 3, 3), || ChunkRenderer::new(gl)),
+            chunk_renderers: Array3::from_shape_simple_fn(chunk_shape, || ChunkRenderer::new(gl)),
 
             block_array_texture,
             program,

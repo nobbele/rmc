@@ -93,7 +93,7 @@ fn main() {
             scroll_delta: 0,
         };
 
-        let mut game_renderer = GameRenderer::new(&gl);
+        let mut game_renderer = GameRenderer::new(&gl, game.curr.world.shape);
         for (pos, chunk) in game.curr.world.chunks_iter() {
             game_renderer.update_chunk(
                 &gl,
@@ -380,4 +380,28 @@ fn main() {
             }
         }
     }
+}
+
+#[test]
+fn test_terrain_sampler() {
+    let terrain = rmc_common::game::TerrainSampler::new(6543);
+    let mut image = image::GrayImage::new(16 * 7, 16 * 7);
+    for chunk_x in 0..7 {
+        for chunk_z in 0..7 {
+            for local_x in 0..16 {
+                for local_z in 0..16 {
+                    let world_coord = Vec2::new(
+                        chunk_x * CHUNK_SIZE + local_x,
+                        chunk_z * CHUNK_SIZE + local_z,
+                    );
+                    image.put_pixel(
+                        world_coord.x as u32,
+                        world_coord.y as u32,
+                        image::Luma::from([terrain.sample(world_coord.as_()) as u8 * 10]),
+                    )
+                }
+            }
+        }
+    }
+    image.save("../terrain.png").unwrap();
 }
