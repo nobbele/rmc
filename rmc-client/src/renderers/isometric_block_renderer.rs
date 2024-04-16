@@ -27,6 +27,8 @@ impl IsometricBlockRenderer {
             vertices.extend_from_slice(&vs);
         };
 
+        // TODO this is still scuffed...
+
         let angle = 30_f32.to_radians().sin().atan();
         let h = angle.sin() * std::f32::consts::SQRT_2 / 2.0;
         let w = angle.cos() * std::f32::consts::SQRT_2 / 2.0;
