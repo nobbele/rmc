@@ -8,6 +8,7 @@ pub struct InputState {
     pub keys: HashMap<Keycode, ButtonState>,
     pub mouse_buttons: HashMap<MouseButton, ButtonState>,
     pub mouse_delta: Vec2<f32>,
+    pub scroll_delta: i32,
 }
 
 impl InputState {

@@ -185,6 +185,9 @@ impl Game {
             self.world.get_block(pos)
         });
 
+        self.hotbar.active = (self.hotbar.active as i32 - input.scroll_delta)
+            .rem_euclid(self.hotbar.slots.len() as i32) as usize;
+
         self.handle_place_destroy(input);
         self.update_blocks();
 

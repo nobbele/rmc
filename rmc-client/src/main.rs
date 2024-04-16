@@ -90,6 +90,7 @@ fn main() {
             keys: HashMap::new(),
             mouse_buttons: HashMap::new(),
             mouse_delta: Vec2::zero(),
+            scroll_delta: 0,
         };
 
         let mut game_renderer = GameRenderer::new(&gl);
@@ -122,35 +123,38 @@ fn main() {
 
                 if !imgui.io().want_capture_keyboard && !imgui.io().want_capture_mouse {
                     match &event {
-                        Event::KeyDown {
+                        &Event::KeyDown {
                             keycode: Some(keycode),
                             ..
                         } => {
                             keyboard_buffer.push(KeyboardEvent {
-                                key: *keycode,
+                                key: keycode,
                                 state: ButtonStateEvent::Press,
                             });
                         }
-                        Event::MouseButtonDown { mouse_btn, .. } => {
+                        &Event::MouseButtonDown { mouse_btn, .. } => {
                             mouse_button_buffer.push(MouseButtonEvent {
-                                button: *mouse_btn,
+                                button: mouse_btn,
                                 state: ButtonStateEvent::Press,
                             });
                         }
-                        Event::KeyUp {
+                        &Event::KeyUp {
                             keycode: Some(keycode),
                             ..
                         } => {
                             keyboard_buffer.push(KeyboardEvent {
-                                key: *keycode,
+                                key: keycode,
                                 state: ButtonStateEvent::Release,
                             });
                         }
-                        Event::MouseButtonUp { mouse_btn, .. } => {
+                        &Event::MouseButtonUp { mouse_btn, .. } => {
                             mouse_button_buffer.push(MouseButtonEvent {
-                                button: *mouse_btn,
+                                button: mouse_btn,
                                 state: ButtonStateEvent::Release,
                             });
+                        }
+                        &Event::MouseWheel { y, .. } => {
+                            input_state.scroll_delta += y;
                         }
                         _ => {}
                     }
@@ -207,6 +211,7 @@ fn main() {
                 game.push_from(|_prev, game| game.update(&input_state));
 
                 input_state.mouse_delta = Vec2::zero();
+                input_state.scroll_delta = 0;
 
                 if game.curr.world.origin() != game.prev.world.origin() {
                     for (pos, _chunk) in game.prev.world.chunks_iter() {
