@@ -235,12 +235,12 @@ fn main() {
                             .prev
                             .world
                             .chunk_at_world(pos * CHUNK_SIZE as i32)
-                            .map(|c| c.blocks)
+                            .map(|c| c.blocks.clone())
                             != game
                                 .curr
                                 .world
                                 .chunk_at_world(pos * CHUNK_SIZE as i32)
-                                .map(|c| c.blocks)
+                                .map(|c| c.blocks.clone())
                         {
                             game_renderer.update_chunk(
                                 &gl,
@@ -307,6 +307,30 @@ fn main() {
                         game.curr.camera.look_at()
                     ));
                     ui.text(format!("On Ground: {}", game.curr.on_ground));
+                    ui.text(format!(
+                        "Blocks: {} ({} triangles)",
+                        game_renderer
+                            .chunk_renderers
+                            .map(|c| c.ib_size)
+                            .sum()
+                            .to_string()
+                            .as_bytes()
+                            .rchunks(3)
+                            .rev()
+                            .map(std::str::from_utf8)
+                            .collect::<Result<Vec<&str>, _>>()
+                            .unwrap()
+                            .join(","),
+                        (game_renderer.chunk_renderers.map(|c| c.ib_size).sum() * 36)
+                            .to_string()
+                            .as_bytes()
+                            .rchunks(3)
+                            .rev()
+                            .map(std::str::from_utf8)
+                            .collect::<Result<Vec<&str>, _>>()
+                            .unwrap()
+                            .join(",")
+                    ));
                 });
 
             gl.clear(glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT);

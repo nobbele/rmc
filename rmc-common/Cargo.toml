@@ -12,6 +12,7 @@ lazy_static = "1.4"
 itertools = "0.12"
 enum-assoc = "1.1"
 noise = "0.9"
+crossbeam-channel = "0.5"
 
 # inline_tweak = "1.1.1"
 

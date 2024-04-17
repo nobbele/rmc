@@ -285,7 +285,7 @@ impl ChunkRenderer {
     ) {
         let instances = blocks
             .indexed_iter()
-            .filter(|(_idx, block)| !block.ty.is_air())
+            .filter(|(_idx, block)| !block.ty.is_air() && !block.concealed)
             .map(|(pos, block)| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), block))
             .map(|(pos, block)| Instance {
                 position: offset + pos.as_(),

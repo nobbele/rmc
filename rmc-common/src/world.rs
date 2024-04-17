@@ -1,7 +1,7 @@
-use std::{mem, rc::Rc};
+use std::{mem, sync::Arc};
 
 use itertools::Itertools;
-use ndarray::{Array2, Array3};
+use ndarray::Array3;
 use vek::{Vec2, Vec3};
 
 use crate::{game::TerrainSampler, Block, DiscreteBlend};
@@ -10,7 +10,7 @@ pub const CHUNK_SIZE: usize = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
-    pub blocks: Rc<Array3<Block>>,
+    pub blocks: Array3<Block>,
 }
 
 impl Chunk {
@@ -18,25 +18,32 @@ impl Chunk {
         Chunk::default()
     }
 
+    pub fn from_blocks(blocks: Array3<Block>) -> Self {
+        Chunk { blocks }
+    }
+
     pub fn set_block(&mut self, local: Vec3<i32>, block: Block) {
-        let mut new_blocks = Rc::unwrap_or_clone(Rc::clone(&self.blocks));
-        new_blocks[local.as_().into_tuple()] = block;
-        self.blocks = Rc::new(new_blocks);
+        self.blocks[local.as_().into_tuple()] = block;
     }
 }
 
 impl Default for Chunk {
     fn default() -> Self {
-        Chunk {
-            blocks: Rc::new(Array3::from_elem(
-                (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
-                Block {
-                    open_to_sky: true,
-                    ..Block::AIR
-                },
-            )),
-        }
+        Chunk::from_blocks(Array3::from_elem(
+            (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
+            Block {
+                open_to_sky: true,
+                ..Block::AIR
+            },
+        ))
     }
+}
+
+pub type ArcChunk = Arc<Chunk>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldError {
+    ChunkNotLoaded,
 }
 
 #[derive(Clone)]
@@ -44,7 +51,7 @@ pub struct World {
     origin: Vec3<i32>,
 
     // None means unloaded
-    pub chunks: Array3<Option<Chunk>>,
+    pub chunks: Array3<Option<ArcChunk>>,
 
     // Half width to the sides, excluding middle. i.e (chunks.dim() - 1) / 2
     pub extents: Vec3<i32>,
@@ -54,7 +61,7 @@ pub struct World {
 
 impl World {
     pub fn new(origin: Vec3<i32>) -> Self {
-        let extents = Vec3::new(2, 2, 2);
+        let extents = Vec3::new(3, 2, 3);
         let shape = (extents * 2 + Vec3::one()).as_().into_tuple();
         World {
             chunks: Array3::default(shape),
@@ -117,8 +124,6 @@ impl World {
                 continue;
             }
 
-            println!("{} -> {}", index, new_index);
-
             chunks[new_index.into_tuple()] = Some(chunk.clone());
         }
 
@@ -136,18 +141,18 @@ impl World {
 
     pub fn load(&mut self, chunk_coordinate: Vec3<i32>, chunk: Chunk) {
         let Some(index) = self.chunk_to_index(chunk_coordinate) else {
-            panic!()
+            return;
         };
 
-        self.chunks[index.into_tuple()] = Some(chunk);
+        self.chunks[index.into_tuple()] = Some(Arc::new(chunk));
     }
 
-    pub fn chunk_at_world(&self, position: Vec3<i32>) -> Option<Chunk> {
+    pub fn chunk_at_world(&self, position: Vec3<i32>) -> Option<ArcChunk> {
         self.chunk_at(self.world_to_chunk(position))
     }
 
     /// Chunk coords to chunk.
-    pub fn chunk_at(&self, position: Vec3<i32>) -> Option<Chunk> {
+    pub fn chunk_at(&self, position: Vec3<i32>) -> Option<ArcChunk> {
         self.chunks
             .get(self.chunk_to_index(position)?.into_tuple())
             .cloned()
@@ -155,7 +160,7 @@ impl World {
     }
 
     /// World coords to chunk.
-    pub fn chunk_at_world_mut(&mut self, position: Vec3<i32>) -> Option<&mut Chunk> {
+    pub fn chunk_at_world_mut(&mut self, position: Vec3<i32>) -> Option<&mut ArcChunk> {
         self.chunks
             .get_mut(
                 self.chunk_to_index(self.world_to_chunk(position))?
@@ -172,13 +177,17 @@ impl World {
         chunk.blocks.get(chunk_offset.as_().into_tuple()).cloned()
     }
 
-    pub fn set_block(&mut self, position: Vec3<i32>, block: Block) {
+    #[must_use]
+    pub fn set_block(&mut self, position: Vec3<i32>, block: Block) -> Result<(), WorldError> {
         let Some(chunk) = self.chunk_at_world_mut(position) else {
-            panic!("{} is not in a loaded chunk", position);
+            return Err(WorldError::ChunkNotLoaded);
         };
         let chunk_offset = position.map(|e| (e as i32).rem_euclid(CHUNK_SIZE as i32));
 
-        chunk.set_block(chunk_offset, block);
+        let mut new_chunk = Arc::unwrap_or_clone(Arc::clone(&chunk));
+        new_chunk.set_block(chunk_offset, block);
+        *chunk = Arc::new(new_chunk);
+        Ok(())
     }
 
     pub fn index_to_chunk(&self, index: Vec3<usize>) -> Vec3<i32> {
@@ -195,7 +204,7 @@ impl World {
         })
     }
 
-    pub fn chunks_iter(&self) -> impl Iterator<Item = (Vec3<i32>, Chunk)> + '_ {
+    pub fn chunks_iter(&self) -> impl Iterator<Item = (Vec3<i32>, ArcChunk)> + '_ {
         self.chunks.indexed_iter().filter_map(|(index, chunk)| {
             chunk
                 .clone()
@@ -223,14 +232,14 @@ fn test_world() {
     assert_eq!(world.get_block(Vec3::new(-4, 4, -2)), Some(Block::AIR));
 
     let chunk = (&mut world.chunks[(0, 1, 0)]).as_mut().unwrap();
-    let mut new_blocks = Rc::unwrap_or_clone(Rc::clone(&chunk.blocks));
-    new_blocks[(12, 4, 14)] = Block::GRASS;
-    chunk.blocks = Rc::new(new_blocks);
+    let mut new_chunk = Arc::unwrap_or_clone(Arc::clone(&chunk));
+    new_chunk.blocks[(12, 4, 14)] = Block::GRASS;
+    *chunk = Arc::new(new_chunk);
 
     assert_eq!(world.get_block(Vec3::new(-4, 4, -2)), Some(Block::GRASS));
 
     assert_eq!(world.get_block(Vec3::new(-4, 4, -1)), Some(Block::AIR));
-    world.set_block(Vec3::new(-4, 4, -1), Block::GRASS);
+    world.set_block(Vec3::new(-4, 4, -1), Block::GRASS).unwrap();
     assert_eq!(world.get_block(Vec3::new(-4, 4, -1)), Some(Block::GRASS));
 }
 
@@ -273,33 +282,41 @@ pub fn surrounding_neighbors(position: Vec3<i32>) -> [Vec3<i32>; 6 + 8] {
 }
 
 pub fn generate_chunk(terrain: &TerrainSampler, chunk_coordinate: Vec3<i32>) -> Chunk {
-    println!("loading {}..", chunk_coordinate);
+    // println!("loading {}..", chunk_coordinate);
 
-    // TODO non-rc'd chunk..
-    let mut chunk = Chunk::new();
+    let mut blocks = Array3::from_elem(
+        (CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE),
+        Block {
+            open_to_sky: true,
+            light: 255,
+            ..Block::AIR
+        },
+    );
 
-    let height_map = Array2::<u32>::from_shape_fn((CHUNK_SIZE, CHUNK_SIZE), |(x, y)| {
-        let local = Vec2::<usize>::new(x, y).as_::<i32>();
-        let world_coord =
-            Vec2::new(chunk_coordinate.x, chunk_coordinate.z) * CHUNK_SIZE as i32 + local;
-        terrain.sample(world_coord)
-    });
+    for x in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            let local = Vec2::<usize>::new(x, z).as_::<i32>();
+            let world_coord =
+                Vec2::new(chunk_coordinate.x, chunk_coordinate.z) * CHUNK_SIZE as i32 + local;
+            let height = terrain.sample(world_coord);
 
-    for ((x, z), &height) in height_map.indexed_iter() {
-        let chunk_y = height as i32 / CHUNK_SIZE as i32;
-        let local = Vec3::<usize>::new(x, height as usize % CHUNK_SIZE, z).as_::<i32>();
+            let chunk_y = height as i32 / CHUNK_SIZE as i32;
+            let local = Vec3::<usize>::new(x, height as usize % CHUNK_SIZE, z).as_::<i32>();
 
-        if chunk_coordinate.y < chunk_y {
-            for y in 0..16 {
-                chunk.set_block(local.with_y(y), Block::GRASS);
-            }
-        } else if chunk_coordinate.y == chunk_y {
-            for y in 0..local.y {
-                chunk.set_block(local.with_y(y), Block::GRASS);
+            if chunk_coordinate.y < chunk_y {
+                for y in 0..16 {
+                    blocks[local.with_y(y).as_().into_tuple()] = Block::GRASS;
+                    blocks[local.with_y(y).as_().into_tuple()].concealed = y < 14;
+                }
+            } else if chunk_coordinate.y == chunk_y {
+                for y in 0..local.y {
+                    blocks[local.with_y(y).as_().into_tuple()] = Block::GRASS;
+                    blocks[local.with_y(y).as_().into_tuple()].open_to_sky = y == local.y - 1;
+                }
             }
         }
     }
 
-    println!("done!");
-    chunk
+    // println!("done!");
+    Chunk::from_blocks(blocks)
 }

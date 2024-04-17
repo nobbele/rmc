@@ -4,14 +4,18 @@ use crate::{
     input::InputState,
     light::calculate_block_light,
     raycast::{raycast, RaycastOutput},
-    world::{face_neighbors, generate_chunk, World, CHUNK_SIZE},
+    world::{face_neighbors, generate_chunk, surrounding_neighbors, Chunk, World, CHUNK_SIZE},
     Blend, Block, BlockType, Camera, DiscreteBlend,
 };
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use noise::NoiseFn;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
-use std::collections::{HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+    thread::JoinHandle,
+};
 use vek::{Aabb, Extent3, Vec2, Vec3};
 
 pub const TICK_RATE: u32 = 16;
@@ -24,7 +28,8 @@ lazy_static! {
     // sqrt isn't const fn :/
     pub static ref JUMP_STRENGTH: f32 = 1.15 * (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
 }
-const SPEED: f32 = 4.0;
+// const SPEED: f32 = 4.0;
+const SPEED: f32 = 16.0;
 
 const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 1.8, 0.2);
 const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
@@ -97,9 +102,58 @@ impl TerrainSampler {
 impl DiscreteBlend for TerrainSampler {}
 
 #[derive(Clone)]
+pub struct ChunkLoader {
+    #[allow(dead_code)]
+    handle: Rc<Vec<JoinHandle<()>>>,
+    tx: crossbeam_channel::Sender<Vec3<i32>>,
+    rx: crossbeam_channel::Receiver<(Vec3<i32>, Chunk)>,
+}
+
+impl ChunkLoader {
+    pub fn new(terrain: TerrainSampler) -> Self {
+        let (tx, thread_rx) = crossbeam_channel::unbounded::<Vec3<i32>>();
+        let (thread_tx, rx) = crossbeam_channel::unbounded::<(Vec3<i32>, Chunk)>();
+        let handle = (0..4)
+            .map(|_| {
+                let thread_rx = thread_rx.clone();
+                let thread_tx = thread_tx.clone();
+                let terrain = terrain.clone();
+                std::thread::spawn(move || {
+                    while let Ok(chunk_coord) = thread_rx.recv() {
+                        // println!("Handling {}", chunk_coord);
+                        thread_tx
+                            .send((chunk_coord, generate_chunk(&terrain, chunk_coord)))
+                            .unwrap();
+                    }
+                })
+            })
+            .collect_vec();
+        ChunkLoader {
+            handle: Rc::new(handle),
+            tx,
+            rx,
+        }
+    }
+
+    pub fn request(&self, chunk_coord: Vec3<i32>) {
+        self.tx.send(chunk_coord).unwrap();
+    }
+
+    pub fn receive(&self) -> Option<(Vec3<i32>, Chunk)> {
+        match self.rx.try_recv() {
+            Ok((chunk_coord, chunk)) => Some((chunk_coord, chunk)),
+            Err(crossbeam_channel::TryRecvError::Empty) => None,
+            Err(e) => Err(e).unwrap(),
+        }
+    }
+}
+
+impl DiscreteBlend for ChunkLoader {}
+
+#[derive(Clone)]
 pub struct Game {
     pub world: World,
-    pub terrain: TerrainSampler,
+    pub chunk_loader: ChunkLoader,
 
     pub camera: Camera,
     pub velocity: Vec3<f32>,
@@ -130,65 +184,78 @@ pub struct Game {
 impl Game {
     pub fn new() -> Self {
         let mut world = World::new(Vec3::zero());
-        let terrain = TerrainSampler::new(54327);
+        let chunk_loader = ChunkLoader::new(TerrainSampler::new(54327));
 
         let unloaded_chunks = world.unloaded_chunks().collect_vec();
+        let total = unloaded_chunks.len();
         for chunk_coord in unloaded_chunks {
-            world.load(chunk_coord, generate_chunk(&terrain, chunk_coord));
+            chunk_loader.request(chunk_coord);
         }
 
-        for z in 0..15 {
-            for x in 0..15 {
-                world.set_block(
-                    Vec3::new(-1 * CHUNK_SIZE as i32 + x, 19, -1 * CHUNK_SIZE as i32 + z).as_(),
-                    Block::WOOD,
+        let mut loaded = 0;
+        while world.unloaded_chunks().next().is_some() {
+            while let Some((chunk_coord, chunk)) = chunk_loader.receive() {
+                world.load(chunk_coord, chunk);
+                loaded += 1;
+                println!(
+                    "Loaded chunk {loaded} / {total} ({:.0}%)",
+                    loaded as f32 / total as f32 * 100.0
                 );
             }
         }
 
-        for x in 0..15 {
-            for y in 0..6 {
-                world.set_block(
-                    Vec3::new(
-                        -1 * CHUNK_SIZE as i32 + x,
-                        y + 14,
-                        -1 * CHUNK_SIZE as i32 + 0,
-                    )
-                    .as_(),
-                    Block::WOOD,
-                );
-            }
-        }
+        // for z in 0..15 {
+        //     for x in 0..15 {
+        //         world.set_block(
+        //             Vec3::new(-1 * CHUNK_SIZE as i32 + x, 19, -1 * CHUNK_SIZE as i32 + z).as_(),
+        //             Block::WOOD,
+        //         );
+        //     }
+        // }
 
-        for x in 0..15 {
-            for y in 0..6 {
-                world.set_block(
-                    Vec3::new(-1 * CHUNK_SIZE as i32 + x, y + 14, -2).as_(),
-                    Block::WOOD,
-                );
-            }
-        }
+        // for x in 0..15 {
+        //     for y in 0..6 {
+        //         world.set_block(
+        //             Vec3::new(
+        //                 -1 * CHUNK_SIZE as i32 + x,
+        //                 y + 14,
+        //                 -1 * CHUNK_SIZE as i32 + 0,
+        //             )
+        //             .as_(),
+        //             Block::WOOD,
+        //         );
+        //     }
+        // }
 
-        for z in 0..15 {
-            for y in 0..6 {
-                world.set_block(
-                    Vec3::new(
-                        -1 * CHUNK_SIZE as i32 + 0,
-                        y + 14,
-                        -1 * CHUNK_SIZE as i32 + z,
-                    )
-                    .as_(),
-                    Block::WOOD,
-                );
-            }
-        }
+        // for x in 0..15 {
+        //     for y in 0..6 {
+        //         world.set_block(
+        //             Vec3::new(-1 * CHUNK_SIZE as i32 + x, y + 14, -2).as_(),
+        //             Block::WOOD,
+        //         );
+        //     }
+        // }
+
+        // for z in 0..15 {
+        //     for y in 0..6 {
+        //         world.set_block(
+        //             Vec3::new(
+        //                 -1 * CHUNK_SIZE as i32 + 0,
+        //                 y + 14,
+        //                 -1 * CHUNK_SIZE as i32 + z,
+        //             )
+        //             .as_(),
+        //             Block::WOOD,
+        //         );
+        //     }
+        // }
 
         let mut game = Game {
-            terrain,
+            chunk_loader,
             world,
 
             camera: Camera {
-                position: Vec3::new(8.5, 18.0, 8.5),
+                position: Vec3::new(8.5, 24.0, 8.5),
                 pitch: Angle(0.0),
                 yaw: Angle(0.0),
             },
@@ -217,7 +284,7 @@ impl Game {
         self.handle_camera_movement(input);
         self.handle_movement(input);
 
-        // self.velocity.y -= GRAVITY * TICK_DELTA;
+        self.velocity.y -= GRAVITY * TICK_DELTA;
         self.camera.position += self.velocity * TICK_DELTA;
 
         self.handle_collision(&initial);
@@ -232,22 +299,27 @@ impl Game {
         self.handle_place_destroy(input);
         self.update_blocks();
 
-        if self
-            .chunk_coordinate()
-            .as_::<f32>()
-            .distance(self.world.origin().as_::<f32>())
-            >= 2.0
-        {
+        if self.chunk_coordinate() != self.world.origin() {
             self.world.set_origin(self.chunk_coordinate());
 
-            let unloaded_chunks = self.world.unloaded_chunks().collect_vec();
+            let unloaded_chunks = self
+                .world
+                .unloaded_chunks()
+                .filter(|chunk_coord| {
+                    chunk_coord
+                        .as_::<f32>()
+                        .distance(self.world.origin().as_::<f32>())
+                        < self.world.extents.as_::<f32>().average()
+                })
+                .collect_vec();
 
-            for chunk_coordinate in unloaded_chunks {
-                self.world.load(
-                    chunk_coordinate,
-                    generate_chunk(&self.terrain, chunk_coordinate),
-                );
+            for chunk_coord in unloaded_chunks {
+                self.chunk_loader.request(chunk_coord);
             }
+        }
+
+        while let Some((chunk_coord, chunk)) = self.chunk_loader.receive() {
+            self.world.load(chunk_coord, chunk);
         }
     }
 
@@ -273,7 +345,7 @@ impl Game {
     fn handle_collision(&mut self, initial: &Game) {
         self.on_ground = false;
 
-        const MAX_ITERATIONS: usize = 8;
+        const MAX_ITERATIONS: usize = 4;
 
         'iteration_loop: for _ in 0..MAX_ITERATIONS {
             let player_box_position = initial.camera.position - PLAYER_ORIGIN;
@@ -336,6 +408,7 @@ impl Game {
                     )
                 })
                 .filter_map(|(pos, block)| block.map(|b| (pos, b)))
+                .filter(|(_pos, block)| !block.concealed)
                 // WTF How does this improve the collision detection???
                 .collect_vec()
                 .into_iter()
@@ -379,7 +452,7 @@ impl Game {
     }
 
     fn update_blocks(&mut self) {
-        const MAX_UPDATES_COUNT: usize = 8192;
+        const MAX_UPDATES_COUNT: usize = 1024;
 
         self.block_update_count = 0;
 
@@ -414,6 +487,14 @@ impl Game {
                         true
                     };
 
+                new_block.concealed = surrounding_neighbors(position).into_iter().all(|position| {
+                    if let Some(block) = self.world.get_block(position) {
+                        !block.ty.is_air()
+                    } else {
+                        false
+                    }
+                });
+
                 new_block.light = calculate_block_light(&self.world, position, new_block, source);
 
                 // Hack: If the source is None (i.e placed by user).
@@ -443,12 +524,13 @@ impl Game {
     }
 
     pub fn set_block1(&mut self, position: Vec3<i32>, block: Block, update: bool) {
-        self.world.set_block(position, block);
-        if update {
-            self.dirty_blocks.push_back(BlockUpdate {
-                target: position,
-                source: None,
-            });
+        if self.world.set_block(position, block).is_ok() {
+            if update {
+                self.dirty_blocks.push_back(BlockUpdate {
+                    target: position,
+                    source: None,
+                });
+            }
         }
     }
 
@@ -487,7 +569,7 @@ impl Blend for Game {
     fn blend(&self, other: &Game, alpha: f32) -> Self {
         Self {
             world: self.world.blend(&other.world, alpha),
-            terrain: self.terrain.blend(&other.terrain, alpha),
+            chunk_loader: self.chunk_loader.blend(&other.chunk_loader, alpha),
 
             camera: self.camera.blend(&other.camera, alpha),
             velocity: self.velocity.blend(&other.velocity, alpha),

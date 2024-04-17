@@ -25,6 +25,7 @@ pub struct Block {
     pub ty: BlockType,
     pub light: u8,
     pub open_to_sky: bool,
+    pub concealed: bool,
 }
 
 impl Block {
@@ -33,7 +34,13 @@ impl Block {
             ty,
             light: 0,
             open_to_sky: false,
+            concealed: false,
         }
+    }
+
+    pub const fn with_light(mut self, light: u8) -> Block {
+        self.light = light;
+        self
     }
 
     pub const AIR: Block = Block::new(BlockType::Air);
