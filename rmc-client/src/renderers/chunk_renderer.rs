@@ -3,7 +3,10 @@ use std::mem;
 use bytemuck::offset_of;
 use glow::HasContext;
 use ndarray::ArrayView3;
-use rmc_common::{world::face_neighbors, Block};
+use rmc_common::{
+    world::{face_neighbors, World},
+    Block,
+};
 use vek::{Vec2, Vec3};
 
 /*
@@ -128,16 +131,6 @@ fn generate_face(normal: Vec3<f32>, texture_origin: Vec2<f32>, face: u8) -> [Ver
             ..e
         }
     })
-}
-
-fn get_block_light(blocks: ArrayView3<Block>, pos: Vec3<i32>) -> u8 {
-    if pos.into_iter().all(|e| e >= 0) {
-        if let Some(block) = blocks.get(pos.map(|e| e as usize).into_tuple()) {
-            return block.light;
-        }
-    }
-
-    15
 }
 
 impl ChunkRenderer {
@@ -282,17 +275,19 @@ impl ChunkRenderer {
     pub unsafe fn update_data(
         &mut self,
         gl: &glow::Context,
-        offset: Vec3<f32>,
+        offset: Vec3<i32>,
         blocks: ArrayView3<Block>,
+        world: &World,
     ) {
         let instances = blocks
             .indexed_iter()
             .filter(|(_idx, block)| !block.ty.is_air() && !block.concealed)
             .map(|(pos, block)| (Vec3::new(pos.0 as i32, pos.1 as i32, pos.2 as i32), block))
             .map(|(pos, block)| Instance {
-                position: offset + pos.as_(),
+                position: offset.as_() + pos.as_(),
                 texture: block.ty as u8 - 1,
-                light: face_neighbors(pos).map(|p| get_block_light(blocks, p)),
+                light: face_neighbors(offset + pos)
+                    .map(|p| world.get_block(p).map(|b| b.light).unwrap_or(0)),
             })
             .collect::<Vec<_>>();
 

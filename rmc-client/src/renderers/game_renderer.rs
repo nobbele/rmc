@@ -1,7 +1,7 @@
 use glow::HasContext;
 use ndarray::Array3;
 use rmc_common::{
-    world::{Chunk, CHUNK_SIZE},
+    world::{Chunk, World, CHUNK_SIZE},
     CameraExt, Game,
 };
 use vek::{Mat4, Vec3};
@@ -57,11 +57,13 @@ impl GameRenderer {
         idx: (usize, usize, usize),
         chunk_coord: Vec3<i32>,
         chunk: &Chunk,
+        world: &World,
     ) {
         self.chunk_renderers[idx].update_data(
             gl,
-            chunk_coord.as_() * CHUNK_SIZE as f32,
+            chunk_coord * CHUNK_SIZE as i32,
             chunk.blocks.view(),
+            &world,
         );
     }
 

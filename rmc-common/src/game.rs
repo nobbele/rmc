@@ -430,8 +430,6 @@ impl Game {
                 }
             }
 
-            dbg!(&collisions);
-
             // WTF How does this improve the collision detection???
             collisions.reverse();
 

@@ -100,6 +100,7 @@ fn main() {
                 game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
                 pos,
                 &chunk,
+                &game.curr.world,
             );
         }
 
@@ -234,6 +235,7 @@ fn main() {
                             game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
                             pos,
                             &chunk,
+                            &game.curr.world,
                         );
                     }
                 } else {
@@ -251,7 +253,7 @@ fn main() {
                                 .chunk_at_world(pos * CHUNK_SIZE as i32)
                                 .map(|c| c.blocks.clone())
                         {
-                            game_renderer.update_chunk(&gl, index, pos, &chunk);
+                            game_renderer.update_chunk(&gl, index, pos, &chunk, &game.curr.world);
                         }
                     }
                 }
