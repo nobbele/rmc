@@ -306,7 +306,7 @@ pub fn generate_chunk(terrain: &TerrainSampler, chunk_coordinate: Vec3<i32>) -> 
             if chunk_coordinate.y < chunk_y {
                 for y in 0..16 {
                     blocks[local.with_y(y).as_().into_tuple()] = Block::GRASS;
-                    blocks[local.with_y(y).as_().into_tuple()].concealed = y < 14;
+                    blocks[local.with_y(y).as_().into_tuple()].occluded = y < 14;
                 }
             } else if chunk_coordinate.y == chunk_y {
                 for y in 0..local.y {
@@ -322,17 +322,16 @@ pub fn generate_chunk(terrain: &TerrainSampler, chunk_coordinate: Vec3<i32>) -> 
             for z in 0..CHUNK_SIZE {
                 let local = Vec3::<usize>::new(x, y, z).as_::<i32>();
 
-                let concealed = face_neighbors(local).into_iter().all(|position| {
-                    match blocks.get(position.as_().into_tuple()) {
-                        Some(Block {
-                            ty: BlockType::Air, ..
-                        }) => false,
-                        None => false,
-                        Some(_) => true,
-                    }
-                });
-
-                blocks[local.as_().into_tuple()].concealed = concealed;
+                blocks[local.as_().into_tuple()].occluded =
+                    face_neighbors(local).into_iter().all(|position| {
+                        match blocks.get(position.as_().into_tuple()) {
+                            Some(Block {
+                                ty: BlockType::Air, ..
+                            }) => false,
+                            None => false,
+                            Some(_) => true,
+                        }
+                    });
             }
         }
     }

@@ -1,6 +1,10 @@
 #![feature(more_float_constants)]
 use glow::HasContext;
-use renderers::{screen_quad_renderer::DrawParams, IsometricBlockRenderer, ScreenQuadRenderer};
+use ndarray::Array3;
+use renderers::{
+    screen_quad_renderer::DrawParams, ChunkRenderer, IsometricBlockRenderer, ScreenQuadRenderer,
+};
+use replace_with::replace_with_or_abort;
 use rmc_common::{
     game::{BlockOrItem, TICK_DELTA, TICK_SPEED},
     input::{ButtonBuffer, ButtonStateEvent, InputState, KeyboardEvent, MouseButtonEvent},
@@ -8,15 +12,17 @@ use rmc_common::{
     Blend, Game, LookBack,
 };
 use sdl2::{event::Event, keyboard::Keycode};
-use std::{collections::HashMap, process::exit, time::Instant};
+use std::{collections::HashMap, mem::MaybeUninit, process::exit, time::Instant};
 use texture::{load_image, DataSource};
-use vek::Vec2;
+use vek::{Vec2, Vec3};
 
 use crate::renderers::GameRenderer;
 
 pub mod renderers;
 pub mod shader;
 pub mod texture;
+
+// TODO we need to destroy objects...
 
 fn main() {
     unsafe {
@@ -222,22 +228,66 @@ fn main() {
                 input_state.scroll_delta = 0;
 
                 if game.curr.world.origin() != game.prev.world.origin() {
-                    for (pos, _chunk) in game.prev.world.chunks_iter() {
-                        game_renderer.clear_chunk(
-                            &gl,
-                            game.prev.world.chunk_to_index(pos).unwrap().into_tuple(),
-                        );
-                    }
+                    let diff = game.curr.world.origin() - game.prev.world.origin();
 
-                    for (pos, chunk) in game.curr.world.chunks_iter() {
-                        game_renderer.update_chunk(
-                            &gl,
-                            game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
-                            pos,
-                            &chunk,
-                            &game.curr.world,
-                        );
-                    }
+                    replace_with_or_abort(&mut game_renderer.chunk_renderers, |chunk_renderers| {
+                        let mut chunk_renderers =
+                            std::mem::transmute::<_, Array3<MaybeUninit<_>>>(chunk_renderers);
+                        let mut new_chunk_renderers = Array3::default(chunk_renderers.dim());
+                        for (index, _chunk) in game
+                            .prev
+                            .world
+                            .chunks
+                            .indexed_iter()
+                            .filter_map(|(idx, chunk)| chunk.as_ref().map(|chunk| (idx, chunk)))
+                        {
+                            let index = Vec3::<usize>::from(index);
+                            let (Some(x), Some(y), Some(z)) = index
+                                .zip(diff)
+                                .map(|(i, o)| i.checked_add_signed(-o as isize))
+                                .into_tuple()
+                            else {
+                                continue;
+                            };
+                            let new_index = Vec3::new(x, y, z);
+
+                            // Skip out-of-bounds
+                            if new_index
+                                .zip(chunk_renderers.dim().into())
+                                .iter()
+                                .any(|&(i, e)| i >= e)
+                            {
+                                continue;
+                            };
+
+                            // SAFETY:
+                            // `index` is unique here, and will be replaced at the end.
+                            new_chunk_renderers[new_index.into_tuple()] = Some(
+                                std::mem::replace(
+                                    &mut chunk_renderers[index.into_tuple()],
+                                    std::mem::MaybeUninit::uninit(),
+                                )
+                                .assume_init(),
+                            );
+                        }
+
+                        let mut it = new_chunk_renderers.indexed_iter_mut().map(|(index, c)| {
+                            std::mem::take(c).unwrap_or_else(|| {
+                                let mut chunk_renderer = ChunkRenderer::new(&gl);
+                                if let Some(chunk) = &game.curr.world.chunks[index] {
+                                    chunk_renderer.update_data(
+                                        &gl,
+                                        game.curr.world.index_to_chunk(Vec3::<usize>::from(index))
+                                            * CHUNK_SIZE as i32,
+                                        chunk.blocks.view(),
+                                        &game.curr.world,
+                                    );
+                                }
+                                chunk_renderer
+                            })
+                        });
+                        Array3::from_shape_simple_fn(chunk_renderers.dim(), || it.next().unwrap())
+                    });
                 } else {
                     for (pos, chunk) in game.curr.world.chunks_iter() {
                         let index = game.curr.world.chunk_to_index(pos).unwrap().into_tuple();

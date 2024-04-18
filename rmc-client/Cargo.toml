@@ -16,3 +16,4 @@ imgui-sdl2-support = { git = "https://github.com/nobbele/imgui-rs", rev = "43df8
 imgui = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
 image = "0.25"
 ndarray = "0.15"
+replace_with = "0.1.7"

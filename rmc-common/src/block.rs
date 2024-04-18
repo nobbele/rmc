@@ -26,7 +26,9 @@ pub struct Block {
     pub ty: BlockType,
     pub light: u8,
     pub open_to_sky: bool,
-    pub concealed: bool,
+
+    /// Whether a block is fully occluded from view or not, used for rendering optimization.
+    pub occluded: bool,
 }
 
 impl Block {
@@ -35,7 +37,7 @@ impl Block {
             ty,
             light: 0,
             open_to_sky: false,
-            concealed: false,
+            occluded: false,
         }
     }
 

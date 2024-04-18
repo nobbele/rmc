@@ -4,7 +4,7 @@ use crate::{
     input::InputState,
     light::calculate_block_light,
     raycast::{raycast, RaycastOutput},
-    world::{face_neighbors, generate_chunk, surrounding_neighbors, Chunk, World, CHUNK_SIZE},
+    world::{face_neighbors, generate_chunk, Chunk, World, CHUNK_SIZE},
     Blend, Block, BlockType, Camera, DiscreteBlend,
 };
 use crossbeam_queue::SegQueue;
@@ -34,7 +34,15 @@ const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
 #[derive(Clone)]
 pub struct BlockUpdate {
     pub target: Vec3<i32>,
+
+    /// Which block caused the update,
+    /// or None for non-block causes such as user placing/destroying a block.
     pub source: Option<Vec3<i32>>,
+
+    /// If this update was caused by another block changing it's state,
+    /// such as user placing/destroying a block,
+    /// or a neighbor having it's light updated.
+    pub state_changed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -420,10 +428,7 @@ impl Game {
                     max: pos.as_() + Vec3::one(),
                 };
 
-                if block.ty != BlockType::Air
-                    && !block.concealed
-                    && broad_box.collides_with_aabb(block_box)
-                {
+                if block.ty != BlockType::Air && broad_box.collides_with_aabb(block_box) {
                     if let Some(result) = sweep_test(player_sweep, block_box) {
                         collisions.push(result);
                     }
@@ -476,6 +481,7 @@ impl Game {
             for BlockUpdate {
                 target: position,
                 source,
+                state_changed,
             } in dirty_blocks
             {
                 // TODO If this fails, it should be put in some wait queue that gets flushed once a chunk loads.
@@ -497,7 +503,7 @@ impl Game {
                         true
                     };
 
-                new_block.concealed = surrounding_neighbors(position).into_iter().all(|position| {
+                new_block.occluded = face_neighbors(position).into_iter().all(|position| {
                     if let Some(block) = self.world.get_block(position) {
                         !block.ty.is_air()
                     } else {
@@ -507,21 +513,28 @@ impl Game {
 
                 new_block.light = calculate_block_light(&self.world, position, new_block, source);
 
+                if new_block != block {
+                    replaces.insert(position, new_block);
+                }
+
+                let should_notify_neighbor =
+                    block.light != new_block.light || block.open_to_sky != new_block.open_to_sky;
+
                 // Hack: If the source is None (i.e placed by user).
                 // then always update the neighbors.
                 // Also, almost all updates are from `concealed`
-                if block != new_block || source.is_none() {
+                if source.is_none() || should_notify_neighbor || state_changed {
                     for neighbor in face_neighbors(position)
                         .into_iter()
                         // .filter(|&p| Some(p) != source)
                         .map(|p| BlockUpdate {
                             target: p,
                             source: Some(p),
+                            state_changed: should_notify_neighbor,
                         })
                     {
                         self.dirty_blocks.push(neighbor);
                     }
-                    replaces.insert(position, new_block);
                 }
             }
 
@@ -541,6 +554,7 @@ impl Game {
                 self.dirty_blocks.push(BlockUpdate {
                     target: position,
                     source: None,
+                    state_changed: true,
                 });
             }
         }
