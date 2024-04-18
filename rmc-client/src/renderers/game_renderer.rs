@@ -2,7 +2,7 @@ use glow::HasContext;
 use ndarray::Array3;
 use rmc_common::{
     world::{Chunk, CHUNK_SIZE},
-    Game,
+    CameraExt, Game,
 };
 use vek::{Mat4, Vec3};
 
@@ -98,10 +98,31 @@ impl GameRenderer {
         );
 
         gl.bind_texture(glow::TEXTURE_2D_ARRAY, Some(self.block_array_texture));
-        for chunk_renderer in &self.chunk_renderers {
-            chunk_renderer.draw(&gl);
+        for (index, chunk_renderer) in self.chunk_renderers.indexed_iter() {
+            if game
+                .camera
+                .is_chunk_in_view(game.world.index_to_chunk(index.into()))
+            {
+                chunk_renderer.draw(&gl);
+            }
         }
 
         gl.disable(glow::DEPTH_TEST);
+    }
+
+    pub fn blocks_to_draw(&self, game: &Game) -> usize {
+        self.chunk_renderers
+            .indexed_iter()
+            .filter_map(|(index, c)| {
+                if game
+                    .camera
+                    .is_chunk_in_view(game.world.index_to_chunk(index.into()))
+                {
+                    Some(c.ib_size)
+                } else {
+                    None
+                }
+            })
+            .sum()
     }
 }

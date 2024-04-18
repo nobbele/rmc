@@ -108,6 +108,9 @@ fn main() {
         let mut keyboard_buffer = ButtonBuffer::new();
         let mut mouse_button_buffer = ButtonBuffer::new();
 
+        let mut dt_buffer = Vec::new();
+        let mut buffered_dt = 0.0;
+
         let mut running = true;
         let mut accumulator = 0.0;
         while running {
@@ -116,7 +119,11 @@ fn main() {
                 / sdl.timer().unwrap().performance_frequency() as f32;
             accumulator += dt * TICK_SPEED;
 
-            let fps = 1.0 / dt;
+            dt_buffer.push(dt);
+            if dt_buffer.len() >= 20 {
+                buffered_dt = dt_buffer.pop().unwrap();
+                dt_buffer.clear();
+            }
 
             for event in event_pump.poll_iter() {
                 imgui_platform.handle_event(&mut imgui, &event);
@@ -231,6 +238,8 @@ fn main() {
                     }
                 } else {
                     for (pos, chunk) in game.curr.world.chunks_iter() {
+                        let index = game.curr.world.chunk_to_index(pos).unwrap().into_tuple();
+
                         if game
                             .prev
                             .world
@@ -242,12 +251,7 @@ fn main() {
                                 .chunk_at_world(pos * CHUNK_SIZE as i32)
                                 .map(|c| c.blocks.clone())
                         {
-                            game_renderer.update_chunk(
-                                &gl,
-                                game.curr.world.chunk_to_index(pos).unwrap().into_tuple(),
-                                pos,
-                                &chunk,
-                            );
+                            game_renderer.update_chunk(&gl, index, pos, &chunk);
                         }
                     }
                 }
@@ -265,11 +269,16 @@ fn main() {
                 .position([0.0, 0.0], imgui::Condition::Always)
                 .always_auto_resize(true)
                 .build(|| {
-                    ui.text(format!("FPS: {:.0} ({:.0}ms)", fps, (1.0 / fps) * 1000.0));
                     ui.text(format!(
-                        "Updates: {} / {}",
+                        "FPS: {:.0} ({:.0}ms)",
+                        1.0 / buffered_dt,
+                        buffered_dt * 1000.0
+                    ));
+                    ui.text(format!(
+                        "Updates: {} / {} (total: {})",
                         game.curr.block_update_count,
-                        game.curr.dirty_blocks.len()
+                        game.curr.dirty_blocks.len(),
+                        game.curr.total_block_update_count,
                     ));
                     ui.text(format!("Position: {:.2}", game.curr.camera.position));
                     ui.text(format!("Block Position: {}", game.curr.block_coordinate()));
@@ -310,9 +319,7 @@ fn main() {
                     ui.text(format!(
                         "Blocks: {} ({} triangles)",
                         game_renderer
-                            .chunk_renderers
-                            .map(|c| c.ib_size)
-                            .sum()
+                            .blocks_to_draw(&game.curr)
                             .to_string()
                             .as_bytes()
                             .rchunks(3)
@@ -321,7 +328,7 @@ fn main() {
                             .collect::<Result<Vec<&str>, _>>()
                             .unwrap()
                             .join(","),
-                        (game_renderer.chunk_renderers.map(|c| c.ib_size).sum() * 36)
+                        (game_renderer.blocks_to_draw(&game.curr))
                             .to_string()
                             .as_bytes()
                             .rchunks(3)

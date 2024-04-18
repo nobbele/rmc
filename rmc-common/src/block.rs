@@ -6,6 +6,7 @@ use crate::DiscreteBlend;
 #[func(pub fn light_emission(&self) -> Option<u8>)]
 #[func(pub fn light_passing(&self) -> bool { false })]
 #[func(pub fn is_air(&self) -> bool { false })]
+#[repr(u8)]
 pub enum BlockType {
     #[default]
     #[assoc(light_passing = true)]

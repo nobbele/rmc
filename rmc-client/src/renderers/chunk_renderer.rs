@@ -69,6 +69,7 @@ pub struct ChunkRenderer {
 
     pub ib: glow::Buffer,
     pub ib_size: usize,
+    pub has_data: bool,
 }
 
 fn generate_face(normal: Vec3<f32>, texture_origin: Vec2<f32>, face: u8) -> [Vertex; 4] {
@@ -274,6 +275,7 @@ impl ChunkRenderer {
             ebo,
             ib,
             ib_size: 0,
+            has_data: false,
         }
     }
 
@@ -301,22 +303,28 @@ impl ChunkRenderer {
             glow::STATIC_DRAW,
         );
         self.ib_size = instances.len();
+        self.has_data = true;
     }
 
     pub unsafe fn clear_data(&mut self, gl: &glow::Context) {
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ib));
-        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &[], glow::STATIC_DRAW);
-        self.ib_size = 0;
+        if self.has_data {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ib));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &[], glow::STATIC_DRAW);
+            self.ib_size = 0;
+            self.has_data = false;
+        }
     }
 
     pub unsafe fn draw(&self, gl: &glow::Context) {
-        gl.bind_vertex_array(Some(self.vao));
-        gl.draw_elements_instanced(
-            glow::TRIANGLES,
-            36,
-            glow::UNSIGNED_BYTE,
-            0,
-            self.ib_size as _,
-        );
+        if self.ib_size > 0 {
+            gl.bind_vertex_array(Some(self.vao));
+            gl.draw_elements_instanced(
+                glow::TRIANGLES,
+                36,
+                glow::UNSIGNED_BYTE,
+                0,
+                self.ib_size as _,
+            );
+        }
     }
 }

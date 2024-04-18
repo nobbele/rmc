@@ -12,9 +12,11 @@ pub mod raycast;
 mod blend;
 mod block;
 mod camera;
+mod camera_ext;
 pub use blend::{Blend, DiscreteBlend};
 pub use block::{Block, BlockType};
 pub use camera::Camera;
+pub use camera_ext::CameraExt;
 
 pub trait Apply: Sized {
     /// Apply a function to this value and return the (possibly) modified value.

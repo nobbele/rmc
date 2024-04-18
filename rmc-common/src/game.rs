@@ -7,15 +7,12 @@ use crate::{
     world::{face_neighbors, generate_chunk, surrounding_neighbors, Chunk, World, CHUNK_SIZE},
     Blend, Block, BlockType, Camera, DiscreteBlend,
 };
+use crossbeam_queue::SegQueue;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use noise::NoiseFn;
 use sdl2::{keyboard::Keycode, mouse::MouseButton};
-use std::{
-    collections::{HashMap, VecDeque},
-    rc::Rc,
-    thread::JoinHandle,
-};
+use std::{collections::HashMap, ops::Deref, rc::Rc, thread::JoinHandle};
 use vek::{Aabb, Extent3, Vec2, Vec3};
 
 pub const TICK_RATE: u32 = 16;
@@ -150,6 +147,19 @@ impl ChunkLoader {
 
 impl DiscreteBlend for ChunkLoader {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discrete<T>(pub T);
+
+impl<T: Deref> Deref for Discrete<T> {
+    type Target = <T as Deref>::Target;
+
+    fn deref(&self) -> &Self::Target {
+        <T as Deref>::deref(&self.0)
+    }
+}
+
+impl<T> DiscreteBlend for Discrete<T> {}
+
 #[derive(Clone)]
 pub struct Game {
     pub world: World,
@@ -161,9 +171,10 @@ pub struct Game {
     pub on_ground: bool,
     pub look_at_raycast: Option<RaycastOutput>,
 
-    pub dirty_blocks: VecDeque<BlockUpdate>,
+    pub dirty_blocks: Discrete<Rc<crossbeam_queue::SegQueue<BlockUpdate>>>,
     // This is per tick
     pub block_update_count: usize,
+    pub total_block_update_count: usize,
 
     pub hotbar: Hotbar,
 }
@@ -264,8 +275,9 @@ impl Game {
             on_ground: false,
 
             look_at_raycast: None,
-            dirty_blocks: VecDeque::new(),
+            dirty_blocks: Discrete(Rc::new(SegQueue::new())),
             block_update_count: 0,
+            total_block_update_count: 0,
 
             hotbar: Hotbar::new(),
         };
@@ -380,10 +392,15 @@ impl Game {
 
             let mut collisions = Vec::new();
 
-            // TODO broad phase over chunks.
-            for (pos, _block) in self
+            for (pos, block) in self
                 .world
                 .chunks_iter()
+                .filter(|(pos, _c)| {
+                    broad_box.collides_with_aabb(Aabb {
+                        min: pos.as_() * CHUNK_SIZE as f32,
+                        max: (pos.as_() + Vec3::one()) * CHUNK_SIZE as f32,
+                    })
+                })
                 .flat_map(|(chunk_coord, chunk)| {
                     chunk
                         .blocks
@@ -397,34 +414,26 @@ impl Game {
                         .collect_vec()
                         .into_iter()
                 })
-                .map(|(pos, block)| {
-                    (
-                        pos,
-                        if block.ty == BlockType::Air {
-                            None
-                        } else {
-                            Some(block)
-                        },
-                    )
-                })
-                .filter_map(|(pos, block)| block.map(|b| (pos, b)))
-                .filter(|(_pos, block)| !block.concealed)
-                // WTF How does this improve the collision detection???
-                .collect_vec()
-                .into_iter()
-                .rev()
             {
                 let block_box = Aabb {
                     min: pos.as_(),
                     max: pos.as_() + Vec3::one(),
                 };
 
-                if broad_box.collides_with_aabb(block_box) {
+                if block.ty != BlockType::Air
+                    && !block.concealed
+                    && broad_box.collides_with_aabb(block_box)
+                {
                     if let Some(result) = sweep_test(player_sweep, block_box) {
                         collisions.push(result);
                     }
                 }
             }
+
+            dbg!(&collisions);
+
+            // WTF How does this improve the collision detection???
+            collisions.reverse();
 
             let Some(SweepTestResult { normal, time }) = collisions
                 .into_iter()
@@ -452,15 +461,18 @@ impl Game {
     }
 
     fn update_blocks(&mut self) {
-        const MAX_UPDATES_COUNT: usize = 1024;
+        const MAX_UPDATES_COUNT: usize = 2048;
 
         self.block_update_count = 0;
 
         while self.block_update_count < MAX_UPDATES_COUNT && self.dirty_blocks.len() != 0 {
             let update_count = self.dirty_blocks.len().min(MAX_UPDATES_COUNT);
             self.block_update_count += update_count;
+            self.total_block_update_count += update_count;
 
-            let dirty_blocks = self.dirty_blocks.drain(..update_count).collect_vec();
+            let dirty_blocks = (0..update_count)
+                .map(|_| self.dirty_blocks.pop().unwrap())
+                .collect_vec();
 
             let mut replaces = HashMap::new();
             for BlockUpdate {
@@ -498,17 +510,19 @@ impl Game {
                 new_block.light = calculate_block_light(&self.world, position, new_block, source);
 
                 // Hack: If the source is None (i.e placed by user).
-                // Then always update the neighbors,
+                // then always update the neighbors.
+                // Also, almost all updates are from `concealed`
                 if block != new_block || source.is_none() {
-                    self.dirty_blocks.extend(
-                        face_neighbors(position)
-                            .into_iter()
-                            // .filter(|&p| Some(p) != source)
-                            .map(|p| BlockUpdate {
-                                target: p,
-                                source: Some(p),
-                            }),
-                    );
+                    for neighbor in face_neighbors(position)
+                        .into_iter()
+                        // .filter(|&p| Some(p) != source)
+                        .map(|p| BlockUpdate {
+                            target: p,
+                            source: Some(p),
+                        })
+                    {
+                        self.dirty_blocks.push(neighbor);
+                    }
                     replaces.insert(position, new_block);
                 }
             }
@@ -526,7 +540,7 @@ impl Game {
     pub fn set_block1(&mut self, position: Vec3<i32>, block: Block, update: bool) {
         if self.world.set_block(position, block).is_ok() {
             if update {
-                self.dirty_blocks.push_back(BlockUpdate {
+                self.dirty_blocks.push(BlockUpdate {
                     target: position,
                     source: None,
                 });
@@ -581,6 +595,9 @@ impl Blend for Game {
             block_update_count: self
                 .block_update_count
                 .blend(&other.block_update_count, alpha),
+            total_block_update_count: self
+                .total_block_update_count
+                .blend(&other.total_block_update_count, alpha),
 
             hotbar: self.hotbar.blend(&other.hotbar, alpha),
         }
@@ -590,7 +607,7 @@ impl Blend for Game {
 #[test]
 pub fn test_game_state_size() {
     // The size of the game state should not grow too large due to frequent use of cloning during updates and blending.
-    const MAX_SIZE: usize = 256;
+    const MAX_SIZE: usize = 512;
 
     assert!(
         std::mem::size_of::<Game>() < MAX_SIZE,
