@@ -298,20 +298,31 @@ pub fn generate_chunk(terrain: &TerrainSampler, chunk_coordinate: Vec3<i32>) -> 
             let local = Vec2::<usize>::new(x, z).as_::<i32>();
             let world_coord =
                 Vec2::new(chunk_coordinate.x, chunk_coordinate.z) * CHUNK_SIZE as i32 + local;
-            let height = terrain.sample(world_coord);
+            let height = terrain.height(world_coord);
 
             let chunk_y = height as i32 / CHUNK_SIZE as i32;
             let local = Vec3::<usize>::new(x, height as usize % CHUNK_SIZE, z).as_::<i32>();
 
             if chunk_coordinate.y < chunk_y {
                 for y in 0..16 {
-                    blocks[local.with_y(y).as_().into_tuple()] = Block::GRASS;
-                    blocks[local.with_y(y).as_().into_tuple()].occluded = y < 14;
+                    let world_coord = chunk_coordinate * CHUNK_SIZE as i32 + local.with_y(y);
+                    let is_cave = terrain.cave(world_coord);
+                    let target = &mut blocks[local.with_y(y).as_().into_tuple()];
+
+                    // if is_cave {
+                    //     println!("cave: {}", world_coord);
+                    // }
+
+                    *target = if is_cave { Block::AIR } else { Block::STONE };
+                    // target.occluded = y < 14;
                 }
             } else if chunk_coordinate.y == chunk_y {
                 for y in 0..local.y {
-                    blocks[local.with_y(y).as_().into_tuple()] = Block::GRASS;
-                    blocks[local.with_y(y).as_().into_tuple()].open_to_sky = y == local.y - 1;
+                    let target = &mut blocks[local.with_y(y).as_().into_tuple()];
+                    let is_top = y == local.y - 1;
+
+                    *target = if is_top { Block::GRASS } else { Block::STONE };
+                    target.open_to_sky = is_top;
                 }
             }
         }

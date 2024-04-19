@@ -19,6 +19,7 @@ pub enum BlockType {
     #[assoc(light_passing = true)]
     Mesh,
     Wood,
+    Stone,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]
@@ -51,8 +52,9 @@ impl Block {
     pub const GRASS: Block = Block::new(BlockType::Grass);
     pub const LANTERN: Block = Block::new(BlockType::Lantern);
     // Transparent rendering is hard :(
-    // pub const MESH: Block = Block::new(BlockType::Mesh);
+    pub const MESH: Block = Block::new(BlockType::Mesh);
     pub const WOOD: Block = Block::new(BlockType::Wood);
+    pub const STONE: Block = Block::new(BlockType::Stone);
 }
 
 impl DiscreteBlend for Block {}

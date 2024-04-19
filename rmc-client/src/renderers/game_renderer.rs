@@ -32,6 +32,7 @@ impl GameRenderer {
                 DataSource::Inline(include_bytes!("../../textures/lantern.png")),
                 DataSource::Inline(include_bytes!("../../textures/mesh.png")),
                 DataSource::Inline(include_bytes!("../../textures/wood.png")),
+                DataSource::Inline(include_bytes!("../../textures/stone.png")),
             ],
         );
 

@@ -25,8 +25,8 @@ lazy_static! {
     // sqrt isn't const fn :/
     pub static ref JUMP_STRENGTH: f32 = 1.15 * (2.0 * GRAVITY * JUMP_HEIGHT - 1.0).sqrt();
 }
-// const SPEED: f32 = 4.0;
-const SPEED: f32 = 16.0;
+const SPEED: f32 = 6.0;
+// const SPEED: f32 = 16.0;
 
 const PLAYER_SIZE: Vec3<f32> = Vec3::new(0.2, 1.8, 0.2);
 const PLAYER_ORIGIN: Vec3<f32> = Vec3::new(0.1, 1.5, 0.1);
@@ -81,13 +81,27 @@ impl TerrainSampler {
         TerrainSampler { seed }
     }
 
-    pub fn sample(&self, position: Vec2<i32>) -> u32 {
+    pub fn height(&self, position: Vec2<i32>) -> u32 {
         const SCALE: f64 = 0.027;
         let height = noise::OpenSimplex::new(self.seed)
             .get([position.x as f64 * SCALE, position.y as f64 * SCALE]);
         let height = (1.0 + height) * 0.5;
         let height = height * 20.0;
-        height as u32
+        32 + height as u32
+    }
+
+    pub fn cave(&self, position: Vec3<i32>) -> bool {
+        if position.y < 0 || position.y > 32 {
+            return false;
+        }
+
+        const SCALE: f64 = 0.027;
+        let v = noise::OpenSimplex::new(self.seed).get([
+            position.x as f64 * SCALE,
+            position.y as f64 * SCALE,
+            position.z as f64 * SCALE,
+        ]);
+        v > 0.3
     }
 }
 
@@ -167,26 +181,12 @@ pub struct Game {
     pub look_at_raycast: Option<RaycastOutput>,
 
     pub dirty_blocks: Discrete<Rc<crossbeam_queue::SegQueue<BlockUpdate>>>,
-    // This is per tick
     pub block_update_count: usize,
     pub total_block_update_count: usize,
 
     pub hotbar: Hotbar,
     pub flying: bool,
 }
-
-// fn initialize_chunk(world: &mut World, chunk: Vec3<i32>) {
-//     for y in 0..14 {
-//         for z in 0..16 {
-//             for x in 0..16 {
-//                 world.set_block(
-//                     chunk * CHUNK_SIZE as i32 + Vec3::new(x, y, z).as_(),
-//                     Block::GRASS,
-//                 );
-//             }
-//         }
-//     }
-// }
 
 impl Game {
     pub fn new() -> Self {
@@ -211,58 +211,12 @@ impl Game {
             }
         }
 
-        // for z in 0..15 {
-        //     for x in 0..15 {
-        //         world.set_block(
-        //             Vec3::new(-1 * CHUNK_SIZE as i32 + x, 19, -1 * CHUNK_SIZE as i32 + z).as_(),
-        //             Block::WOOD,
-        //         );
-        //     }
-        // }
-
-        // for x in 0..15 {
-        //     for y in 0..6 {
-        //         world.set_block(
-        //             Vec3::new(
-        //                 -1 * CHUNK_SIZE as i32 + x,
-        //                 y + 14,
-        //                 -1 * CHUNK_SIZE as i32 + 0,
-        //             )
-        //             .as_(),
-        //             Block::WOOD,
-        //         );
-        //     }
-        // }
-
-        // for x in 0..15 {
-        //     for y in 0..6 {
-        //         world.set_block(
-        //             Vec3::new(-1 * CHUNK_SIZE as i32 + x, y + 14, -2).as_(),
-        //             Block::WOOD,
-        //         );
-        //     }
-        // }
-
-        // for z in 0..15 {
-        //     for y in 0..6 {
-        //         world.set_block(
-        //             Vec3::new(
-        //                 -1 * CHUNK_SIZE as i32 + 0,
-        //                 y + 14,
-        //                 -1 * CHUNK_SIZE as i32 + z,
-        //             )
-        //             .as_(),
-        //             Block::WOOD,
-        //         );
-        //     }
-        // }
-
         let mut game = Game {
             chunk_loader,
             world,
 
             camera: Camera {
-                position: Vec3::new(8.5, 24.0, 8.5),
+                position: Vec3::new(8.5, 48.0, 8.5),
                 pitch: Angle(0.0),
                 yaw: Angle(0.0),
             },
@@ -283,6 +237,9 @@ impl Game {
         game.set_block(Vec3::new(-8, 14, -8), Block::LANTERN);
         game.hotbar.slots[0] = Some(BlockOrItem::Block(BlockType::Wood));
         game.hotbar.slots[1] = Some(BlockOrItem::Block(BlockType::Lantern));
+        game.hotbar.slots[2] = Some(BlockOrItem::Block(BlockType::Test));
+        game.hotbar.slots[3] = Some(BlockOrItem::Block(BlockType::Stone));
+        game.hotbar.slots[4] = Some(BlockOrItem::Block(BlockType::Mesh));
 
         game
     }
@@ -508,7 +465,7 @@ impl Game {
 
                 new_block.occluded = face_neighbors(position).into_iter().all(|position| {
                     if let Some(block) = self.world.get_block(position) {
-                        !block.ty.is_air()
+                        !block.ty.light_passing()
                     } else {
                         false
                     }

@@ -488,7 +488,7 @@ fn test_terrain_sampler() {
                     image.put_pixel(
                         world_coord.x as u32,
                         world_coord.y as u32,
-                        image::Luma::from([terrain.sample(world_coord.as_()) as u8 * 10]),
+                        image::Luma::from([terrain.height(world_coord.as_()) as u8 * 10]),
                     )
                 }
             }
