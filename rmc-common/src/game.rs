@@ -76,31 +76,18 @@ pub struct TerrainSampler {
     seed: u32,
 }
 
-fn sample(min: u32, max: u32, v: f64) -> u32 {
-    min + (v * (max - min) as f64) as u32
-}
-
 impl TerrainSampler {
     pub fn new(seed: u32) -> Self {
         TerrainSampler { seed }
     }
 
     pub fn sample(&self, position: Vec2<i32>) -> u32 {
-        let position = position.as_::<f64>();
-        let noise = noise::OpenSimplex::new(self.seed);
-        let noise2 = noise::Fbm::<noise::OpenSimplex>::new(self.seed + 20 / 2);
-
-        const SCALE: f64 = 1.0 / 10.0;
-
-        let base_height = noise.get((position * SCALE).into_array());
-        let height = noise2.get((position * SCALE).into_array()).powf(1.1);
-        let hills = noise2
-            .get((position * SCALE * 0.5).into_array())
-            .powf(1.0 + height);
-
-        sample(14, 18, base_height)
-            + sample(0, 10, (1.0 - base_height) * height)
-            + sample(0, 16, hills)
+        const SCALE: f64 = 0.027;
+        let height = noise::OpenSimplex::new(self.seed)
+            .get([position.x as f64 * SCALE, position.y as f64 * SCALE]);
+        let height = (1.0 + height) * 0.5;
+        let height = height * 20.0;
+        height as u32
     }
 }
 
