@@ -231,9 +231,11 @@ fn main() {
                     let diff = game.curr.world.origin() - game.prev.world.origin();
 
                     replace_with_or_abort(&mut game_renderer.chunk_renderers, |chunk_renderers| {
-                        let mut chunk_renderers =
+                        let chunk_renderers =
                             std::mem::transmute::<_, Array3<MaybeUninit<_>>>(chunk_renderers);
-                        let mut new_chunk_renderers = Array3::default(chunk_renderers.dim());
+                        let mut new_chunk_renderers =
+                            Array3::<Option<ChunkRenderer>>::default(chunk_renderers.dim());
+                        let mut moved = Array3::from_elem(chunk_renderers.dim(), false);
                         for (index, _chunk) in game
                             .prev
                             .world
@@ -262,13 +264,19 @@ fn main() {
 
                             // SAFETY:
                             // `index` is unique here, and will be replaced at the end.
-                            new_chunk_renderers[new_index.into_tuple()] = Some(
-                                std::mem::replace(
-                                    &mut chunk_renderers[index.into_tuple()],
-                                    std::mem::MaybeUninit::uninit(),
-                                )
-                                .assume_init(),
-                            );
+                            new_chunk_renderers[new_index.into_tuple()] =
+                                Some(chunk_renderers[index.into_tuple()].assume_init_read());
+
+                            moved[index.into_tuple()] = true;
+                        }
+
+                        for (index, &v) in moved.indexed_iter() {
+                            if !v {
+                                // SAFETY:
+                                // `index` is unique and it's explicitly only the indices which have not passed through the loop above.
+                                let mut old = chunk_renderers[index].assume_init_read();
+                                old.destroy(&gl);
+                            }
                         }
 
                         let mut it = new_chunk_renderers.indexed_iter_mut().map(|(index, c)| {
@@ -380,7 +388,7 @@ fn main() {
                             .collect::<Result<Vec<&str>, _>>()
                             .unwrap()
                             .join(","),
-                        (game_renderer.blocks_to_draw(&game.curr))
+                        (game_renderer.blocks_to_draw(&game.curr) * 36)
                             .to_string()
                             .as_bytes()
                             .rchunks(3)

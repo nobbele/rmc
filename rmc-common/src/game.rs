@@ -118,14 +118,14 @@ impl ChunkLoader {
     pub fn new(terrain: TerrainSampler) -> Self {
         let (tx, thread_rx) = crossbeam_channel::unbounded::<Vec3<i32>>();
         let (thread_tx, rx) = crossbeam_channel::unbounded::<(Vec3<i32>, Chunk)>();
-        let handle = (0..4)
+        let handle = (0..std::thread::available_parallelism().unwrap().get())
             .map(|_| {
                 let thread_rx = thread_rx.clone();
                 let thread_tx = thread_tx.clone();
                 let terrain = terrain.clone();
                 std::thread::spawn(move || {
                     while let Ok(chunk_coord) = thread_rx.recv() {
-                        // println!("Handling {}", chunk_coord);
+                        // println!("({}) Handling {}", i, chunk_coord);
                         thread_tx
                             .send((chunk_coord, generate_chunk(&terrain, chunk_coord)))
                             .unwrap();
@@ -185,6 +185,7 @@ pub struct Game {
     pub total_block_update_count: usize,
 
     pub hotbar: Hotbar,
+    pub flying: bool,
 }
 
 // fn initialize_chunk(world: &mut World, chunk: Vec3<i32>) {
@@ -288,6 +289,7 @@ impl Game {
             total_block_update_count: 0,
 
             hotbar: Hotbar::new(),
+            flying: false,
         };
 
         game.set_block(Vec3::new(6, 14, 8), Block::LANTERN);
@@ -304,7 +306,11 @@ impl Game {
         self.handle_camera_movement(input);
         self.handle_movement(input);
 
-        self.velocity.y -= GRAVITY * TICK_DELTA;
+        if !self.flying {
+            self.velocity.y -= GRAVITY * TICK_DELTA;
+        } else {
+            self.velocity.y = 0.0;
+        }
         self.camera.position += self.velocity * TICK_DELTA;
 
         self.handle_collision(&initial);
@@ -318,6 +324,10 @@ impl Game {
 
         self.handle_place_destroy(input);
         self.update_blocks();
+
+        if input.get_key(Keycode::P).just_pressed() {
+            self.flying = !self.flying;
+        }
 
         if self.chunk_coordinate() != self.world.origin() {
             self.world.set_origin(self.chunk_coordinate());
@@ -354,8 +364,14 @@ impl Game {
         let input_vector = input.get_movement_vector();
         let movement_vector =
             input_vector.x * self.camera.right() + input_vector.y * self.camera.forward();
-        self.camera.position +=
-            movement_vector.try_normalized().unwrap_or_default() * SPEED * TICK_DELTA;
+        self.camera.position += movement_vector.try_normalized().unwrap_or_default()
+            * SPEED
+            * TICK_DELTA
+            * if self.flying { 10.0 } else { 1.0 };
+
+        if self.flying && input.get_key(Keycode::Space).pressed() {
+            self.camera.position.y += 10.0 * TICK_DELTA;
+        }
 
         if self.on_ground {
             self.velocity.y = up_down as f32 * *JUMP_STRENGTH;
@@ -612,6 +628,7 @@ impl Blend for Game {
                 .blend(&other.total_block_update_count, alpha),
 
             hotbar: self.hotbar.blend(&other.hotbar, alpha),
+            flying: self.flying.blend(&other.flying, alpha),
         }
     }
 }

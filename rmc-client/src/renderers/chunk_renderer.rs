@@ -65,9 +65,7 @@ unsafe impl bytemuck::Zeroable for Instance {}
 
 pub struct ChunkRenderer {
     pub vao: glow::VertexArray,
-    #[allow(dead_code)]
     pub vbo: glow::Buffer,
-    #[allow(dead_code)]
     pub ebo: glow::Buffer,
 
     pub ib: glow::Buffer,
@@ -321,5 +319,15 @@ impl ChunkRenderer {
                 self.ib_size as _,
             );
         }
+    }
+
+    pub unsafe fn destroy(&mut self, gl: &glow::Context) {
+        self.ib_size = 0;
+        self.has_data = false;
+
+        gl.delete_buffer(self.ebo);
+        gl.delete_buffer(self.ebo);
+        gl.delete_buffer(self.vbo);
+        gl.delete_vertex_array(self.vao);
     }
 }
