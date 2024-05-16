@@ -8,6 +8,7 @@ use crate::{
     Blend, Block, BlockType, Camera, DiscreteBlend,
 };
 use crossbeam_queue::SegQueue;
+use enum_assoc::Assoc;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use noise::NoiseFn;
@@ -45,16 +46,30 @@ pub struct BlockUpdate {
     pub state_changed: bool,
 }
 
-#[derive(Clone, Copy)]
-pub enum Item {}
+#[derive(Debug, Default, Clone, Copy, PartialEq, Assoc)]
+#[func(pub fn name(&self) -> &'static str { "??" })]
+pub enum Item {
+    #[default]
+    #[assoc(name = "Empty")]
+    Empty,
+}
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BlockOrItem {
     Item(Item),
     Block(BlockType),
 }
 
-#[derive(Clone, Copy)]
+impl BlockOrItem {
+    pub fn name(&self) -> &'static str {
+        match self {
+            BlockOrItem::Item(item) => item.name(),
+            BlockOrItem::Block(block) => block.name(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Hotbar {
     pub slots: [Option<BlockOrItem>; 9],
     pub active: usize,
@@ -194,20 +209,20 @@ impl Game {
         let chunk_loader = ChunkLoader::new(TerrainSampler::new(54327));
 
         let unloaded_chunks = world.unloaded_chunks().collect_vec();
-        let total = unloaded_chunks.len();
+        let _total = unloaded_chunks.len();
         for chunk_coord in unloaded_chunks {
             chunk_loader.request(chunk_coord);
         }
 
-        let mut loaded = 0;
+        let mut _loaded = 0;
         while world.unloaded_chunks().next().is_some() {
             while let Some((chunk_coord, chunk)) = chunk_loader.receive() {
                 world.load(chunk_coord, chunk);
-                loaded += 1;
-                println!(
-                    "Loaded chunk {loaded} / {total} ({:.0}%)",
-                    loaded as f32 / total as f32 * 100.0
-                );
+                // loaded += 1;
+                // println!(
+                //     "Loaded chunk {loaded} / {total} ({:.0}%)",
+                //     loaded as f32 / total as f32 * 100.0
+                // );
             }
         }
 

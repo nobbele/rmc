@@ -1,25 +1,44 @@
-use enum_assoc::Assoc;
-
 use crate::DiscreteBlend;
+use enum_assoc::Assoc;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone, Assoc)]
 #[func(pub fn light_emission(&self) -> Option<u8>)]
 #[func(pub fn light_passing(&self) -> bool { false })]
 #[func(pub fn is_air(&self) -> bool { false })]
+#[func(pub fn name(&self) -> &'static str { "??" })]
 #[repr(u8)]
 pub enum BlockType {
     #[default]
     #[assoc(light_passing = true)]
     #[assoc(is_air = true)]
     Air,
+
+    #[assoc(name = "Test")]
     Test,
+
+    #[assoc(name = "Grass")]
     Grass,
+
     #[assoc(light_emission = 224)]
+    #[assoc(name = "Lantern")]
     Lantern,
+
     #[assoc(light_passing = true)]
+    #[assoc(name = "Mesh")]
     Mesh,
+
+    #[assoc(name = "Wood")]
     Wood,
+
+    #[assoc(name = "Stone")]
     Stone,
+}
+
+impl Display for BlockType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Copy, Clone)]

@@ -61,7 +61,7 @@ pub struct World {
 
 impl World {
     pub fn new(origin: Vec3<i32>) -> Self {
-        let extents = Vec3::new(8, 2, 8);
+        let extents = Vec3::new(6, 2, 6);
         let shape = (extents * 2 + Vec3::one()).as_().into_tuple();
         World {
             chunks: Array3::default(shape),

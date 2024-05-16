@@ -331,3 +331,11 @@ impl ChunkRenderer {
         gl.delete_vertex_array(self.vao);
     }
 }
+
+// impl Drop for ChunkRenderer {
+//     fn drop(&mut self) {
+//         if self.has_data {
+//             println!("Chunk Renderer leaked GPU memory.")
+//         }
+//     }
+// }

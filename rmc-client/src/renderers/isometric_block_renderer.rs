@@ -1,6 +1,6 @@
 use crate::shader::create_shader;
 
-use super::screen_quad_renderer::{DrawParams, ScreenVertex};
+use super::{screen_quad_renderer::ScreenVertex, DrawParams};
 use bytemuck::offset_of;
 use glow::HasContext;
 use rmc_common::BlockType;

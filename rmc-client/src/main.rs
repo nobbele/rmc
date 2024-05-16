@@ -1,8 +1,10 @@
 #![feature(more_float_constants)]
+use crate::renderers::GameRenderer;
 use glow::HasContext;
+use glyph_brush::Section;
 use ndarray::Array3;
 use renderers::{
-    screen_quad_renderer::DrawParams, ChunkRenderer, IsometricBlockRenderer, ScreenQuadRenderer,
+    ChunkRenderer, DrawParams, IsometricBlockRenderer, ScreenQuadRenderer, TextRenderer,
 };
 use replace_with::replace_with_or_abort;
 use rmc_common::{
@@ -14,9 +16,7 @@ use rmc_common::{
 use sdl2::{event::Event, keyboard::Keycode};
 use std::{collections::HashMap, mem::MaybeUninit, process::exit, time::Instant};
 use texture::{load_image, DataSource};
-use vek::{Vec2, Vec3};
-
-use crate::renderers::GameRenderer;
+use vek::{Vec2, Vec3, Vec4};
 
 pub mod renderers;
 pub mod shader;
@@ -71,7 +71,7 @@ fn main() {
             imgui_glow_renderer::Renderer::initialize(&gl, &mut imgui, &mut imgui_textures, false)
                 .unwrap();
 
-        // gl.enable(glow::CULL_FACE);
+        gl.enable(glow::CULL_FACE);
         gl.clear_color(0.1, 0.2, 0.3, 1.0);
 
         let crosshair_image = load_image(
@@ -98,6 +98,19 @@ fn main() {
             mouse_delta: Vec2::zero(),
             scroll_delta: 0,
         };
+
+        let mut hotbar_text_renderer = TextRenderer::new(
+            &gl,
+            Section::default().add_text(
+                glyph_brush::Text::new(
+                    game.curr.hotbar.slots[game.curr.hotbar.active]
+                        .map(|b| b.name())
+                        .unwrap_or_default(),
+                )
+                .with_color(Vec4::new(1.0, 1.0, 1.0, 1.0).into_array())
+                .with_scale(48.0),
+            ),
+        );
 
         let mut game_renderer = GameRenderer::new(&gl, game.curr.world.shape);
         for (pos, chunk) in game.curr.world.chunks_iter() {
@@ -462,6 +475,41 @@ fn main() {
                         }
                     }
                 }
+
+                if game.curr.hotbar.active != game.prev.hotbar.active {
+                    let name = game.curr.hotbar.slots[game.curr.hotbar.active]
+                        .map(|b| b.name())
+                        .unwrap_or_default();
+
+                    // TODO Idk why this doesn't work
+                    // hotbar_text_renderer.set_section(
+                    //     Section::default().add_text(
+                    //         glyph_brush::Text::new(name)
+                    //             .with_color(Vec4::new(1.0, 1.0, 1.0, 1.0).into_array())
+                    //             .with_scale(48.0),
+                    //     ),
+                    // );
+                    // hotbar_text_renderer.flush(&gl);
+
+                    hotbar_text_renderer = TextRenderer::new(
+                        &gl,
+                        Section::default().add_text(
+                            glyph_brush::Text::new(name)
+                                .with_color(Vec4::new(1.0, 1.0, 1.0, 1.0).into_array())
+                                .with_scale(48.0),
+                        ),
+                    )
+                }
+
+                hotbar_text_renderer.draw(
+                    &gl,
+                    DrawParams::default()
+                        .position(Vec2::new(
+                            1024.0 / 2.0,
+                            768.0 - 32.0 - slot_image.size.y as f32 * scale.y,
+                        ))
+                        .origin(Vec2::new(0.5, 1.0)),
+                );
             }
 
             window.gl_swap_window();

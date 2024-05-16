@@ -1,6 +1,6 @@
 use crate::{shader::create_shader, texture::Image};
 
-use super::face_to_tri;
+use super::{face_to_tri, DrawParams};
 use bytemuck::offset_of;
 use glow::HasContext;
 use std::mem;
@@ -131,44 +131,5 @@ impl ScreenQuadRenderer {
         gl.bind_texture(glow::TEXTURE_2D, Some(image.raw));
         gl.bind_vertex_array(Some(self.vao));
         gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_BYTE, 0);
-    }
-}
-
-// pub enum ScaleOrSize {
-//     Scale(Vec2<f32>),
-//     Size(Vec2<f32>),
-// }
-
-#[derive(Clone, Copy)]
-pub struct DrawParams {
-    pub position: Vec2<f32>,
-    pub origin: Vec2<f32>,
-    pub scale: Vec2<f32>,
-}
-
-impl DrawParams {
-    pub fn scale(mut self, scale: Vec2<f32>) -> Self {
-        self.scale = scale;
-        self
-    }
-
-    pub fn position(mut self, position: Vec2<f32>) -> Self {
-        self.position = position;
-        self
-    }
-
-    pub fn origin(mut self, origin: Vec2<f32>) -> Self {
-        self.origin = origin;
-        self
-    }
-}
-
-impl Default for DrawParams {
-    fn default() -> Self {
-        Self {
-            position: Vec2::zero(),
-            origin: Vec2::zero(),
-            scale: Vec2::one(),
-        }
     }
 }

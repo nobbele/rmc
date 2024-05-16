@@ -17,3 +17,5 @@ imgui = { git = "https://github.com/nobbele/imgui-rs", rev = "43df810" }
 image = "0.25"
 ndarray = "0.15"
 replace_with = "0.1.7"
+ab_glyph = "0.2.25"
+glyph_brush = "0.7.8"
