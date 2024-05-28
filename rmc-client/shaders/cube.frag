@@ -12,7 +12,7 @@ uniform sampler2DArray uniform_Texture;
 
 void main() {
     float z = float(vert_Texture);
-    vec4 texel = vec4(texture(uniform_Texture, vec3(vert_Uv, z)));
+    vec4 texel = texture(uniform_Texture, vec3(vert_Uv, z));
     vec3 highlightColor = vert_Highlighted > 0.5 ? vec3(0.5, 0.5, 0.5) : vec3(0.0, 0.0, 0.0);
 
     if (texel.w == 0) {

@@ -6,7 +6,6 @@ use ndarray::Array3;
 use renderers::{
     ChunkRenderer, DrawParams, IsometricBlockRenderer, ScreenQuadRenderer, TextRenderer,
 };
-use replace_with::replace_with_or_abort;
 use rmc_common::{
     game::{BlockOrItem, TICK_DELTA, TICK_SPEED},
     input::{ButtonBuffer, ButtonStateEvent, InputState, KeyboardEvent, MouseButtonEvent},
@@ -243,72 +242,75 @@ fn main() {
                 if game.curr.world.origin() != game.prev.world.origin() {
                     let diff = game.curr.world.origin() - game.prev.world.origin();
 
-                    replace_with_or_abort(&mut game_renderer.chunk_renderers, |chunk_renderers| {
-                        let chunk_renderers =
-                            std::mem::transmute::<_, Array3<MaybeUninit<_>>>(chunk_renderers);
-                        let mut new_chunk_renderers =
-                            Array3::<Option<ChunkRenderer>>::default(chunk_renderers.dim());
-                        let mut moved = Array3::from_elem(chunk_renderers.dim(), false);
-                        for (index, _chunk) in game
-                            .prev
-                            .world
-                            .chunks
-                            .indexed_iter()
-                            .filter_map(|(idx, chunk)| chunk.as_ref().map(|chunk| (idx, chunk)))
+                    let chunk_renderers = std::mem::transmute::<_, &mut Array3<MaybeUninit<_>>>(
+                        &mut game_renderer.chunk_renderers,
+                    );
+
+                    let mut new_chunk_renderers =
+                        Array3::<Option<ChunkRenderer>>::default(chunk_renderers.dim());
+                    let mut moved = Array3::from_elem(chunk_renderers.dim(), false);
+                    for (index, _chunk) in game
+                        .prev
+                        .world
+                        .chunks
+                        .indexed_iter()
+                        .filter_map(|(idx, chunk)| chunk.as_ref().map(|chunk| (idx, chunk)))
+                    {
+                        let index = Vec3::<usize>::from(index);
+                        let (Some(x), Some(y), Some(z)) = index
+                            .zip(diff)
+                            .map(|(i, o)| i.checked_add_signed(-o as isize))
+                            .into_tuple()
+                        else {
+                            continue;
+                        };
+                        let new_index = Vec3::new(x, y, z);
+
+                        // Skip out-of-bounds
+                        if new_index
+                            .zip(chunk_renderers.dim().into())
+                            .iter()
+                            .any(|&(i, e)| i >= e)
                         {
-                            let index = Vec3::<usize>::from(index);
-                            let (Some(x), Some(y), Some(z)) = index
-                                .zip(diff)
-                                .map(|(i, o)| i.checked_add_signed(-o as isize))
-                                .into_tuple()
-                            else {
-                                continue;
-                            };
-                            let new_index = Vec3::new(x, y, z);
+                            continue;
+                        };
 
-                            // Skip out-of-bounds
-                            if new_index
-                                .zip(chunk_renderers.dim().into())
-                                .iter()
-                                .any(|&(i, e)| i >= e)
-                            {
-                                continue;
-                            };
+                        // SAFETY:
+                        // `index` is unique here, and will be replaced at the end.
+                        new_chunk_renderers[new_index.into_tuple()] =
+                            Some(chunk_renderers[index.into_tuple()].assume_init_read());
 
+                        moved[index.into_tuple()] = true;
+                    }
+
+                    for (index, &v) in moved.indexed_iter() {
+                        if !v {
                             // SAFETY:
-                            // `index` is unique here, and will be replaced at the end.
-                            new_chunk_renderers[new_index.into_tuple()] =
-                                Some(chunk_renderers[index.into_tuple()].assume_init_read());
-
-                            moved[index.into_tuple()] = true;
+                            // `index` is unique and it's explicitly only the indices which have not passed through the loop above.
+                            let mut old = chunk_renderers[index].assume_init_read();
+                            old.destroy(&gl);
                         }
+                    }
 
-                        for (index, &v) in moved.indexed_iter() {
-                            if !v {
-                                // SAFETY:
-                                // `index` is unique and it's explicitly only the indices which have not passed through the loop above.
-                                let mut old = chunk_renderers[index].assume_init_read();
-                                old.destroy(&gl);
+                    let mut it = new_chunk_renderers.indexed_iter_mut().map(|(index, c)| {
+                        std::mem::take(c).unwrap_or_else(|| {
+                            let mut chunk_renderer = ChunkRenderer::new(&gl);
+                            if let Some(chunk) = &game.curr.world.chunks[index] {
+                                chunk_renderer.update_data(
+                                    &gl,
+                                    game.curr.world.index_to_chunk(Vec3::<usize>::from(index))
+                                        * CHUNK_SIZE as i32,
+                                    chunk.blocks.view(),
+                                    &game.curr.world,
+                                );
                             }
-                        }
-
-                        let mut it = new_chunk_renderers.indexed_iter_mut().map(|(index, c)| {
-                            std::mem::take(c).unwrap_or_else(|| {
-                                let mut chunk_renderer = ChunkRenderer::new(&gl);
-                                if let Some(chunk) = &game.curr.world.chunks[index] {
-                                    chunk_renderer.update_data(
-                                        &gl,
-                                        game.curr.world.index_to_chunk(Vec3::<usize>::from(index))
-                                            * CHUNK_SIZE as i32,
-                                        chunk.blocks.view(),
-                                        &game.curr.world,
-                                    );
-                                }
-                                chunk_renderer
-                            })
-                        });
-                        Array3::from_shape_simple_fn(chunk_renderers.dim(), || it.next().unwrap())
+                            chunk_renderer
+                        })
                     });
+
+                    let dim = chunk_renderers.dim();
+                    game_renderer.chunk_renderers =
+                        Array3::from_shape_simple_fn(dim, || it.next().unwrap());
                 } else {
                     for (pos, chunk) in game.curr.world.chunks_iter() {
                         let index = game.curr.world.chunk_to_index(pos).unwrap().into_tuple();
